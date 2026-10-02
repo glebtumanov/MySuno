@@ -1,0 +1,32 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Окружение, модели, вендорный код (ставятся setup.ps1)
+python/
+vendor/
+.venv/
+.uv/
+.cache/
+
+# Результаты работы, БД, логи, временные файлы
+data/
+*.log
+*.db
+*.sqlite*
+*.flac
+*.mp3
+*.wav
+*.safetensors
+*.bin
+*.pt
+tmp/
+
+# IDE / ОС
+.claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

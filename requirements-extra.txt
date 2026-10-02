@@ -1,0 +1,5 @@
+sentencepiece
+hf_xet
+sacremoses
+rich
+submitit

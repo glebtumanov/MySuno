@@ -1,0 +1,210 @@
+"""Очередь задач: один фоновый поток (GPU один), прогресс доступен через polling."""
+from __future__ import annotations
+
+import queue
+import shutil
+import threading
+import time
+import traceback
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+
+from . import config, presets
+from .db import Library
+from .engine import AceEngine, Cancelled
+
+HISTORY_LIMIT = 30
+
+
+@dataclass
+class Job:
+    id: str
+    kind: str                       # generate | load
+    request: dict[str, Any]
+    status: str = "queued"          # queued | running | done | error | cancelled
+    progress: float = 0.0
+    stage: str = "В очереди"
+    created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
+    finished_at: float | None = None
+    error: str | None = None
+    track_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        now = time.time()
+        end = self.finished_at or now
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "status": self.status,
+            "progress": round(self.progress, 3),
+            "stage": self.stage,
+            "error": self.error,
+            "track_ids": self.track_ids,
+            "elapsed": round(end - self.started_at, 1) if self.started_at else 0,
+            "created_at": self.created_at,
+            "title": _job_title(self),
+        }
+
+
+def _job_title(job: Job) -> str:
+    if job.kind == "load":
+        return "Загрузка моделей"
+    req = job.request
+    return (req.get("title") or req.get("prompt") or "Без названия")[:60]
+
+
+class JobManager:
+    def __init__(self, engine: AceEngine, library: Library, get_settings) -> None:
+        self.engine = engine
+        self.library = library
+        self.get_settings = get_settings
+        self._q: queue.Queue[Job] = queue.Queue()
+        self._jobs: dict[str, Job] = {}
+        self._order: list[str] = []
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._worker, name="job-worker", daemon=True)
+        self._thread.start()
+
+    # ---- API ----
+    def submit(self, request: dict[str, Any], kind: str = "generate") -> Job:
+        job = Job(id=uuid.uuid4().hex[:12], kind=kind, request=request)
+        with self._lock:
+            self._jobs[job.id] = job
+            self._order.append(job.id)
+            self._trim()
+        self._q.put(job)
+        return job
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            jobs = (self._jobs[i] for i in reversed(self._order))
+            # успешные задачи загрузки моделей — служебные, в очереди их не показываем
+            return [j.to_dict() for j in jobs if not (j.kind == "load" and j.status == "done")]
+
+    def get(self, job_id: str) -> Job | None:
+        return self._jobs.get(job_id)
+
+    def cancel(self, job_id: str) -> str | None:
+        """Отменяет задачу в очереди, останавливает выполняющуюся или убирает завершённую из списка.
+
+        Возвращает выполненное действие: "cancelled" | "stopping" | "removed" (None — задачи нет).
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
+            if job.status == "queued":
+                job.status, job.stage, job.finished_at = "cancelled", "Отменено", time.time()
+                return "cancelled"
+            if job.status == "running":
+                if job.kind != "generate":
+                    return None   # загрузку моделей прерывать нельзя
+                job.stage = "Останавливаю…"
+                self.engine.request_cancel()
+                return "stopping"
+            self._jobs.pop(job_id, None)
+            self._order.remove(job_id)
+            return "removed"
+
+    def forget_track(self, track_id: str) -> None:
+        """Убирает трек из готовых задач очереди (дизлайк или удаление); опустевшая готовая задача исчезает."""
+        with self._lock:
+            for job_id in list(self._order):
+                job = self._jobs[job_id]
+                if track_id not in job.track_ids:
+                    continue
+                job.track_ids.remove(track_id)
+                if not job.track_ids and job.status == "done":
+                    self._jobs.pop(job_id, None)
+                    self._order.remove(job_id)
+
+    def _trim(self) -> None:
+        finished = [i for i in self._order if self._jobs[i].status in ("done", "error", "cancelled")]
+        for i in finished[: max(0, len(self._order) - HISTORY_LIMIT)]:
+            self._jobs.pop(i, None)
+            self._order.remove(i)
+
+    # ---- worker ----
+    def _worker(self) -> None:
+        while True:
+            job = self._q.get()
+            if job.status == "cancelled":
+                continue
+            job.status, job.started_at, job.stage = "running", time.time(), "Запуск…"
+
+            def progress(value: float, desc: str, _job: Job = job) -> None:
+                _job.progress = max(_job.progress, min(1.0, value))
+                _job.stage = desc
+
+            try:
+                if job.kind == "load":
+                    self.engine.ensure_loaded(self.get_settings(), progress)
+                else:
+                    self._run_generate(job, progress)
+                job.progress, job.status, job.stage = 1.0, "done", "Готово"
+            except Cancelled:
+                job.status, job.stage = "cancelled", "Отменено"
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Задача {} упала: {}\n{}", job.id, exc, traceback.format_exc())
+                job.status, job.error, job.stage = "error", str(exc) or type(exc).__name__, "Ошибка"
+            finally:
+                job.finished_at = time.time()
+
+    def _run_generate(self, job: Job, progress) -> None:
+        settings = self.get_settings()
+        req = job.request
+        tmp = config.TMP_DIR / job.id
+        try:
+            self._generate_and_store(job, req, settings, progress, tmp)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _generate_and_store(self, job: Job, req: dict[str, Any], settings: dict[str, Any], progress,
+                            tmp: Path) -> None:
+        result = self.engine.generate(req, settings, progress, tmp)
+        progress(0.99, "Сохранение в библиотеку…")
+
+        base_title = (req.get("title") or "").strip() or _auto_title(req)
+        n = len(result["tracks"])
+        for i, t in enumerate(result["tracks"], start=1):
+            src = Path(t["path"])
+            track_id = uuid.uuid4().hex[:16]
+            dst = config.TRACKS_DIR / f"{track_id}{src.suffix}"
+            shutil.move(str(src), str(dst))
+            title = base_title if n == 1 else f"{base_title} ({i})"
+            track = self.library.add_track(
+                track_id=track_id,
+                title=title,
+                filename=dst.name,
+                fmt=src.suffix.lstrip("."),
+                folder_id=req.get("folder_id"),
+                duration=t["duration"],
+                seed=t.get("seed"),
+                gen_seconds=result["gen_seconds"],
+                prompt=req.get("prompt", ""),
+                caption=result["caption"],
+                lyrics=result["lyrics"],
+                params={"request": req, "negative": result["negative"],
+                        "description_en": result["description_en"], "plan": result["plan"],
+                        "stages": result.get("stages"), "time_costs": _round_costs(result.get("time_costs")),
+                        "score": t.get("score")},
+            )
+            job.track_ids.append(track["id"])
+
+
+def _round_costs(costs: dict[str, Any] | None) -> dict[str, float]:
+    return {k: round(v, 2) for k, v in (costs or {}).items() if isinstance(v, (int, float))}
+
+
+def _auto_title(req: dict[str, Any]) -> str:
+    prompt = (req.get("prompt") or "").strip()
+    if prompt:
+        return prompt[:40] + ("…" if len(prompt) > 40 else "")
+    labels = {i: l for i, l, _ in presets.GENRES}
+    genres = [labels[g] for g in req.get("genres", []) if g in labels]
+    return ", ".join(genres[:2]) or "Без названия"

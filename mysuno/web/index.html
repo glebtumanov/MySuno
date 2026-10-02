@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MySuno — генератор музыки</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">♪</span> MySuno</div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="create">Создать</button>
+    <button class="tab" data-view="library">Библиотека</button>
+    <button class="tab" data-view="settings">Настройки</button>
+  </nav>
+  <div class="engine-badge" id="engineBadge" title="Состояние моделей">…</div>
+</header>
+
+<main>
+  <!-- ===================== СОЗДАТЬ ===================== -->
+  <section class="view active" id="view-create">
+    <div class="create-layout">
+      <!-- Слева: текст песни на всю высоту -->
+      <aside class="card lyrics-card">
+        <div class="lyrics-head">
+          <h2>Текст песни</h2>
+          <em>русский; разделы [verse], [chorus], [bridge]</em>
+        </div>
+        <textarea id="f-lyrics" maxlength="4096" spellcheck="false"
+          placeholder="[verse]&#10;Дождь стучит по крыше…&#10;&#10;[chorus]&#10;…"></textarea>
+        <label class="check">
+          <input type="checkbox" id="f-autolyrics" checked>
+          Если текста нет — придумать автоматически (LM)
+        </label>
+        <div class="lyrics-tools">
+          <button type="button" class="btn" id="lyricsFixBtn" title="Русские теги секций → английские, пустые строки, автоматическая разметка">Подготовить текст</button>
+          <span class="hint" id="lyricsWarn"></span>
+        </div>
+        <p class="hint">Для вокала «Без вокала» поле отключается. Пустое поле + автотекст: LM напишет текст сам,
+          но качество у него слабее, чем у вашего собственного.</p>
+      </aside>
+
+      <form class="card" id="genForm" autocomplete="off">
+        <h2>Новая композиция</h2>
+
+        <label class="field">
+          <span>Название <em>(необязательно)</em></span>
+          <input type="text" id="f-title" maxlength="120" placeholder="Осенний дождь">
+        </label>
+
+        <label class="field">
+          <span>Описание музыки</span>
+          <textarea id="f-prompt" rows="3" maxlength="2000"
+            placeholder="Например: грустная лирическая песня про осенний дождь, фортепиано и струнные"></textarea>
+        </label>
+
+        <div class="field">
+          <span>Жанры</span>
+          <div class="chips" id="genreChips"></div>
+        </div>
+
+        <div class="field">
+          <span>Настроение</span>
+          <div class="chips" id="moodChips"></div>
+        </div>
+
+        <div class="tag-warn" id="tagWarn" hidden></div>
+
+        <details class="field neg">
+          <summary>Негативные жанры <em>(чего не должно быть)</em></summary>
+          <div class="chips neg-chips" id="negChips"></div>
+          <p class="hint">⚠ Экспериментально. Выбранный жанр убирается из позитивных тегов и передаётся LM как «негативный промпт»,
+            но на turbo-модели в наших A/B-тестах заметного эффекта не было. Надёжного запрета жанра пока нет.</p>
+        </details>
+
+        <div class="field">
+          <span>Вокал</span>
+          <div class="segmented" id="vocalSeg"></div>
+        </div>
+
+        <div class="field">
+          <span>Качество</span>
+          <div class="segmented" id="qualitySeg">
+            <button type="button" data-q="fast">Быстро</button>
+            <button type="button" data-q="good">Хорошо <em>×4</em></button>
+            <button type="button" data-q="max">Максимум <em>×8</em></button>
+          </div>
+          <p class="hint" id="qualityHint"></p>
+        </div>
+
+        <div class="field">
+          <span>Длительность: <b id="durLabel">1:00</b></span>
+          <input type="range" id="f-duration" min="10" max="300" step="5" value="60">
+        </div>
+
+        <div class="field">
+          <span>Температура (креативность LM): <b id="tempLabel">0.85</b></span>
+          <input type="range" id="f-temp" min="0" max="2" step="0.05" value="0.85">
+          <p class="hint">Выше — разнообразнее и рискованнее. Действует при включённом LM-планировщике.</p>
+        </div>
+
+        <details class="field adv">
+          <summary>Расширенные параметры</summary>
+          <div class="adv-grid">
+            <label>Вариантов
+              <input type="number" id="f-batch" min="1" max="8" value="1">
+            </label>
+            <label class="check inline">
+              <input type="checkbox" id="f-keepall"> Сохранять все варианты
+            </label>
+            <label>Seed <em>(пусто = случайный)</em>
+              <input type="number" id="f-seed" placeholder="случайный">
+            </label>
+            <label>Шаги <em>(пусто = авто)</em>
+              <input type="number" id="f-steps" min="1" max="200" placeholder="авто">
+            </label>
+            <label>Guidance <em>(sft/base)</em>
+              <input type="number" id="f-guidance" min="1" max="15" step="0.5" value="7">
+            </label>
+            <label>BPM <em>(пусто = авто)</em>
+              <input type="number" id="f-bpm" min="30" max="300" placeholder="авто">
+            </label>
+            <label>Формат
+              <select id="f-format">
+                <option value="">по умолчанию</option>
+                <option value="flac">FLAC</option>
+                <option value="mp3">MP3</option>
+                <option value="wav">WAV</option>
+              </select>
+            </label>
+            <label>Сохранить в папку
+              <select id="f-folder"><option value="">Без папки</option></select>
+            </label>
+            <label class="check inline">
+              <input type="checkbox" id="f-thinking" checked> LM-планирование
+            </label>
+          </div>
+        </details>
+
+        <div class="form-actions">
+          <button type="submit" class="btn primary big" id="genBtn">Сгенерировать</button>
+          <span class="form-msg" id="formMsg"></span>
+        </div>
+      </form>
+
+      <div class="card queue-card">
+        <h2>Очередь</h2>
+        <div id="jobList" class="job-list"><p class="muted">Пока пусто. Заполните форму и нажмите «Сгенерировать».</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== БИБЛИОТЕКА ===================== -->
+  <section class="view" id="view-library">
+    <div class="lib">
+      <aside class="card folders">
+        <h3>Папки</h3>
+        <ul id="folderList"></ul>
+        <button class="btn" id="newFolderBtn">+ Новая папка</button>
+      </aside>
+      <div class="card tracks">
+        <div class="tracks-head">
+          <h3 id="libTitle">Все треки</h3>
+          <select id="libRating" title="Фильтр по оценке">
+            <option value="visible">Без дизлайков</option>
+            <option value="liked">👍 Понравившиеся</option>
+            <option value="unrated">Без оценки</option>
+            <option value="disliked">👎 Дизлайкнутые</option>
+            <option value="all">Все, включая дизлайки</option>
+          </select>
+          <input type="search" id="libSearch" placeholder="Поиск по названию и описанию">
+        </div>
+        <div id="trackList" class="track-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== НАСТРОЙКИ ===================== -->
+  <section class="view" id="view-settings">
+    <div class="grid-2">
+      <div class="card">
+        <h2>Железо</h2>
+        <dl class="hw" id="hwInfo"></dl>
+        <h3>Модели</h3>
+        <div id="engineInfo" class="engine-info"></div>
+        <div class="form-actions">
+          <button class="btn" id="loadBtn">Загрузить модели</button>
+          <button class="btn" id="unloadBtn">Выгрузить модели</button>
+        </div>
+        <p class="hint">Первая загрузка скачивает веса (≈10–15 ГБ) и может занять несколько минут.
+          Изменение настроек справа применяется при следующей генерации.</p>
+      </div>
+
+      <form class="card" id="settingsForm">
+        <h2>Параметры движка</h2>
+        <label class="field"><span>Устройство</span>
+          <select id="s-device">
+            <option value="auto">Авто (GPU если есть)</option>
+            <option value="cuda">GPU (CUDA)</option>
+            <option value="cpu">CPU</option>
+          </select></label>
+        <label class="field"><span>Диффузионная модель (DiT)</span>
+          <select id="s-dit">
+            <option value="acestep-v15-turbo">turbo — быстрая (8 шагов)</option>
+            <option value="acestep-v15-sft">sft — качественнее (32+ шагов)</option>
+            <option value="acestep-v15-base">base — гибкая (50 шагов)</option>
+          </select></label>
+        <label class="field"><span>Языковая модель (LM-планировщик)</span>
+          <select id="s-lm">
+            <option value="auto">Авто (по VRAM)</option>
+            <option value="none">Выкл. (быстрее, без авто-текста)</option>
+            <option value="acestep-5Hz-lm-0.6B">0.6B</option>
+            <option value="acestep-5Hz-lm-1.7B">1.7B</option>
+          </select></label>
+        <label class="field"><span>Бэкенд LM</span>
+          <select id="s-backend">
+            <option value="auto">Авто</option><option value="vllm">vllm</option><option value="pt">PyTorch</option>
+          </select></label>
+        <label class="field"><span>Выгрузка на CPU (offload)</span>
+          <select id="s-offload">
+            <option value="auto">Авто</option><option value="on">Вкл. (экономит VRAM)</option><option value="off">Выкл. (быстрее)</option>
+          </select></label>
+        <label class="field"><span>Квантование</span>
+          <select id="s-quant">
+            <option value="auto">Авто</option><option value="int8">INT8 (экономит VRAM)</option><option value="off">Выкл.</option>
+          </select></label>
+        <label class="field"><span>Формат аудио по умолчанию</span>
+          <select id="s-format">
+            <option value="flac">FLAC (без потерь)</option><option value="mp3">MP3</option><option value="wav">WAV</option>
+          </select></label>
+        <label class="field"><span>Максимальная длительность, с</span>
+          <input type="number" id="s-maxdur" min="10" max="600" step="10"></label>
+        <label class="check"><input type="checkbox" id="s-translate"> Переводить русское описание на английский (на CPU)</label>
+        <label class="check"><input type="checkbox" id="s-fastlm"> Ускоренный LM-декодер (CUDA Graphs, ~2× быстрее; только GPU)</label>
+        <label class="check"><input type="checkbox" id="s-preload"> Загружать и прогревать модели при запуске сервера</label>
+        <div class="form-actions">
+          <button type="submit" class="btn primary">Сохранить</button>
+          <span class="form-msg" id="settingsMsg"></span>
+        </div>
+      </form>
+    </div>
+  </section>
+</main>
+
+<footer class="player" id="player">
+  <button class="btn icon" id="pPrev" title="Предыдущий">⏮</button>
+  <button class="btn icon play" id="pPlay" title="Воспроизвести/пауза">▶</button>
+  <button class="btn icon" id="pNext" title="Следующий">⏭</button>
+  <div class="p-meta">
+    <div class="p-title" id="pTitle">Ничего не играет</div>
+    <div class="p-seek">
+      <span id="pCur">0:00</span>
+      <input type="range" id="pSeek" min="0" max="1000" value="0">
+      <span id="pDur">0:00</span>
+    </div>
+  </div>
+  <input type="range" id="pVol" min="0" max="1" step="0.01" value="0.9" title="Громкость">
+  <audio id="audio" preload="metadata"></audio>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
