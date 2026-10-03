@@ -19,7 +19,11 @@ GENRES: list[tuple[str, str, str]] = [
     ("jazz", "Джаз", "jazz, piano, double bass, brushed drums"),
     ("blues", "Блюз", "blues, electric guitar, slow shuffle"),
     ("classical", "Классика", "classical, orchestral, strings"),
+    ("neoclassical", "Неоклассика", "neoclassical, modern classical, piano and strings, minimalist"),
+    ("impressionist", "Импрессионизм", "impressionistic piano, debussy style, lush harmonies, flowing arpeggios"),
     ("cinematic", "Кино-оркестр", "cinematic orchestral, epic, strings and brass"),
+    ("ghibli", "Музыка Гибли", "studio ghibli style, whimsical orchestral, piano, strings, nostalgic"),
+    ("pastoral", "Пастораль", "pastoral, flute, gentle strings, idyllic countryside"),
     ("electronic", "Электроника", "electronic, synthesizers"),
     ("edm", "EDM", "edm, festival, big drop"),
     ("house", "Хаус", "house, four on the floor, club"),
@@ -38,7 +42,9 @@ GENRES: list[tuple[str, str, str]] = [
     ("bossa", "Босса-нова", "bossa nova, nylon guitar, soft"),
     ("disco", "Диско", "disco, funky bass, strings"),
     ("kpop", "K-pop", "k-pop, polished, dance"),
-    ("chanson", "Шансон", "russian chanson, acoustic guitar, storytelling"),
+    ("chanson", "Русский шансон", "russian chanson, acoustic guitar, storytelling"),
+    ("frchanson", "Французский шансон", "french chanson, accordion, parisian cafe"),
+    ("romance", "Романс", "russian romance, classical guitar, piano, heartfelt vocals"),
     ("ballad", "Баллада", "ballad, emotional, slow tempo"),
     ("gospel", "Госпел", "gospel, choir, organ"),
 ]
@@ -80,7 +86,8 @@ MOOD_CONFLICTS: list[tuple[str, str]] = [
 _HEAVY = ["metal", "hardrock", "punk", "dnb", "dubstep", "trap", "edm"]
 GENRE_CONFLICTS: list[tuple[str, str]] = (
     [("ambient", g) for g in _HEAVY] + [("classical", g) for g in _HEAVY] + [("lofi", g) for g in _HEAVY]
-    + [("bossa", g) for g in _HEAVY] + [("acoustic", g) for g in ("dubstep", "edm", "techno", "dnb", "metal")]
+    + [("bossa", g) for g in _HEAVY]
+    + [(a, g) for a in ("neoclassical", "impressionist", "ghibli", "pastoral", "romance") for g in _HEAVY] + [("acoustic", g) for g in ("dubstep", "edm", "techno", "dnb", "metal")]
     + [("folk", g) for g in ("dubstep", "edm", "dnb", "metal")]
 )
 MAX_GENRES = 3
