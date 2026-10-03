@@ -11,6 +11,7 @@
   <div class="brand"><span class="logo">♪</span> MySuno</div>
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="create">Создать</button>
+    <button class="tab" data-view="cover">Каверы</button>
     <button class="tab" data-view="library">Библиотека</button>
     <button class="tab" data-view="settings">Настройки</button>
   </nav>
@@ -44,6 +45,11 @@
       <form class="card" id="genForm" autocomplete="off">
         <h2>Новая композиция</h2>
 
+        <div class="loaded-from" id="f-loaded" hidden>
+          <div class="lf-text"></div>
+          <button type="button" class="btn icon" data-lf="clear" title="Забыть загруженные параметры, которых нет в форме">✕</button>
+        </div>
+
         <label class="field">
           <span>Название <em>(необязательно)</em></span>
           <input type="text" id="f-title" maxlength="120" placeholder="Осенний дождь">
@@ -55,24 +61,32 @@
             placeholder="Например: грустная лирическая песня про осенний дождь, фортепиано и струнные"></textarea>
         </label>
 
-        <div class="field">
-          <span>Жанры</span>
-          <div class="chips" id="genreChips"></div>
+        <div class="field fold" data-fold="genres">
+          <button type="button" class="fold-head" aria-expanded="true">
+            <span class="sp-chev"></span><b>Жанры</b><span class="fold-sum" id="genreSum"></span>
+          </button>
+          <div class="fold-body"><div class="chips" id="genreChips"></div></div>
         </div>
 
-        <div class="field">
-          <span>Настроение</span>
-          <div class="chips" id="moodChips"></div>
+        <div class="field fold" data-fold="moods">
+          <button type="button" class="fold-head" aria-expanded="true">
+            <span class="sp-chev"></span><b>Настроение</b><span class="fold-sum" id="moodSum"></span>
+          </button>
+          <div class="fold-body"><div class="chips" id="moodChips"></div></div>
         </div>
 
         <div class="tag-warn" id="tagWarn" hidden></div>
 
-        <details class="field neg">
-          <summary>Негативные жанры <em>(чего не должно быть)</em></summary>
-          <div class="chips neg-chips" id="negChips"></div>
-          <p class="hint">⚠ Экспериментально. Выбранный жанр убирается из позитивных тегов и передаётся LM как «негативный промпт»,
-            но на turbo-модели в наших A/B-тестах заметного эффекта не было. Надёжного запрета жанра пока нет.</p>
-        </details>
+        <div class="field fold neg" data-fold="neg" data-default="collapsed">
+          <button type="button" class="fold-head" aria-expanded="true">
+            <span class="sp-chev"></span><b>Негативные жанры</b><em>(чего не должно быть)</em><span class="fold-sum" id="negSum"></span>
+          </button>
+          <div class="fold-body">
+            <div class="chips neg-chips" id="negChips"></div>
+            <p class="hint">⚠ Экспериментально. Выбранный жанр убирается из позитивных тегов и передаётся LM как «негативный промпт»,
+              но на turbo-модели в наших A/B-тестах заметного эффекта не было. Надёжного запрета жанра пока нет.</p>
+          </div>
+        </div>
 
         <div class="field">
           <span>Вокал</span>
@@ -147,6 +161,202 @@
       <div class="card queue-card">
         <h2>Очередь</h2>
         <div id="jobList" class="job-list"><p class="muted">Пока пусто. Заполните форму и нажмите «Сгенерировать».</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== КАВЕРЫ ===================== -->
+  <section class="view" id="view-cover">
+    <div class="create-layout">
+      <aside class="card lyrics-card">
+        <div class="lyrics-head">
+          <h2>Текст кавера</h2>
+          <em>пусто — инструментал</em>
+        </div>
+        <textarea id="c-lyrics" maxlength="4096" spellcheck="false"
+          placeholder="[verse]&#10;Новый текст на мелодию оригинала…&#10;&#10;[chorus]&#10;…&#10;&#10;Оставьте поле пустым — получится инструментальная версия."></textarea>
+        <div class="lyrics-tools">
+          <button type="button" class="btn" id="c-lyricsFix" title="Русские теги секций → английские, пустые строки, автоматическая разметка">Подготовить текст</button>
+          <button type="button" class="btn" id="c-lyricsOrig" hidden title="Подставить текст трека-исходника из библиотеки">Текст оригинала</button>
+          <span class="hint" id="c-lyricsWarn"></span>
+        </div>
+        <p class="hint">Мелодия, ритм и структура берутся из исходника, поэтому текст лучше раскладывать по тем же
+          куплетам и припевам, что в оригинале, с похожей длиной строк.</p>
+      </aside>
+
+      <form class="card" id="coverForm" autocomplete="off">
+        <h2>Новый кавер</h2>
+
+        <div class="loaded-from" id="c-loaded" hidden>
+          <div class="lf-text"></div>
+          <button type="button" class="btn icon" data-lf="clear" title="Забыть загруженные параметры, которых нет в форме">✕</button>
+        </div>
+
+        <div class="field">
+          <span>Исходник</span>
+
+          <!-- Панель исходников: загрузка, каталог, прослушивание, выбор -->
+          <div class="src-panel" id="c-panel">
+            <div class="sp-top">
+              <button type="button" class="sp-toggle" id="c-spToggle" aria-expanded="true" aria-controls="c-spBody" title="Свернуть / развернуть">
+                <span class="sp-chev"></span><b>Исходники</b><span class="sp-summary" id="c-spSummary"></span>
+              </button>
+              <label class="sp-vol" title="Громкость прослушивания исходников">
+                <button type="button" class="sp-mute" id="c-volMute" title="Выключить звук">🔊</button>
+                <input type="range" id="c-vol" min="0" max="1" step="0.01" value="0.8" aria-label="Громкость исходников">
+                <span class="sp-volval" id="c-volVal">80%</span>
+              </label>
+            </div>
+            <div class="sp-body" id="c-spBody">
+            <div class="sp-head">
+              <div class="segmented sp-tabs" id="c-spTabs">
+                <button type="button" data-tab="uploads">Мои файлы <em id="c-spCount"></em></button>
+                <button type="button" data-tab="library">Из библиотеки</button>
+              </div>
+              <input type="search" id="c-spSearch" placeholder="Поиск">
+            </div>
+            <div class="drop" id="c-drop" tabindex="0">
+              <input type="file" id="c-file" accept="audio/*,.mp3,.wav,.flac,.ogg,.opus,.m4a,.aac" multiple hidden>
+              <div class="drop-icon">⤒</div>
+              <div><b>Перетащите аудиофайлы</b> или нажмите, чтобы выбрать</div>
+              <div class="hint">MP3, WAV, FLAC, OGG, M4A… · можно несколько сразу · лучше 30 с – 3 мин</div>
+            </div>
+            <div class="sp-list" id="c-spList"></div>
+            </div>
+          </div>
+
+          <div class="src-card" id="c-src" hidden>
+            <div class="src-head">
+              <button type="button" class="btn icon play" id="c-play" title="Прослушать выделенный фрагмент">▶</button>
+              <div class="src-name"><b id="c-srcName"></b><span class="hint" id="c-srcInfo"></span></div>
+              <button type="button" class="btn" id="c-srcChange" title="Развернуть панель исходников">Сменить</button>
+              <button type="button" class="btn icon danger" id="c-srcDelete" title="Удалить этот файл с диска" hidden>🗑</button>
+              <button type="button" class="btn icon" id="c-srcClear" title="Убрать из кавера (файл останется в панели)">✕</button>
+            </div>
+            <div class="wave-wrap">
+              <canvas id="c-wave" height="96"></canvas>
+              <div class="wave-msg" id="c-waveMsg"></div>
+            </div>
+            <div class="sel-row">
+              <label>Начало <input type="text" id="c-start" inputmode="decimal" value="0:00"></label>
+              <label>Конец <input type="text" id="c-end" inputmode="decimal" value="0:00"></label>
+              <span class="sel-len" id="c-selLen"></span>
+              <button type="button" class="btn" id="c-selAll">Весь трек</button>
+            </div>
+            <p class="hint">Потяните мышью по волне, чтобы выбрать фрагмент; края можно перетаскивать. Длина кавера = длине фрагмента.</p>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Название <em>(необязательно)</em></span>
+          <input type="text" id="c-title" maxlength="120" placeholder="Кавер: …">
+        </label>
+
+        <label class="field">
+          <span>Новый стиль</span>
+          <textarea id="c-prompt" rows="2" maxlength="2000"
+            placeholder="Например: джаз, саксофон, контрабас, щётки по барабанам"></textarea>
+        </label>
+
+        <div class="field fold" data-fold="c-genres">
+          <button type="button" class="fold-head" aria-expanded="true">
+            <span class="sp-chev"></span><b>Жанры</b><span class="fold-sum" id="c-genreSum"></span>
+          </button>
+          <div class="fold-body"><div class="chips" id="c-genreChips"></div></div>
+        </div>
+
+        <div class="field fold" data-fold="c-moods">
+          <button type="button" class="fold-head" aria-expanded="true">
+            <span class="sp-chev"></span><b>Настроение</b><span class="fold-sum" id="c-moodSum"></span>
+          </button>
+          <div class="fold-body"><div class="chips" id="c-moodChips"></div></div>
+        </div>
+
+        <div class="tag-warn" id="c-tagWarn" hidden></div>
+
+        <div class="field">
+          <span>Вокал</span>
+          <div class="segmented" id="c-vocalSeg"></div>
+          <p class="hint" id="c-vocalHint"></p>
+        </div>
+
+        <div class="field">
+          <span>Способ</span>
+          <div class="segmented" id="c-modeSeg">
+            <button type="button" data-mode="auto">Авто <em>рекомендуется</em></button>
+            <button type="button" data-mode="cover">По нотам</button>
+            <button type="button" data-mode="edit">Перекраска</button>
+          </div>
+          <p class="hint" id="c-modeHint"></p>
+        </div>
+
+        <div class="field">
+          <span>Близость к оригиналу: <b id="c-strengthLabel">0.60</b></span>
+          <div class="segmented" id="c-strengthSeg">
+            <button type="button" data-v="0.4">Свободно</button>
+            <button type="button" data-v="0.6">Баланс</button>
+            <button type="button" data-v="0.85">Близко</button>
+          </div>
+          <input type="range" id="c-strength" min="0.05" max="1" step="0.05" value="0.6">
+          <p class="hint">Насколько результат держится за исходник. Радикальная смена жанра — «Свободно»;
+            лёгкая перестилизация — «Близко».</p>
+        </div>
+
+        <div class="field">
+          <span>Качество</span>
+          <div class="segmented" id="c-qualitySeg">
+            <button type="button" data-q="fast">Быстро</button>
+            <button type="button" data-q="good">Хорошо <em>×4</em></button>
+            <button type="button" data-q="max">Максимум <em>×8</em></button>
+          </div>
+          <p class="hint" id="c-qualityHint"></p>
+        </div>
+
+        <details class="field adv">
+          <summary>Расширенные параметры</summary>
+          <div class="adv-grid">
+            <label class="span-2">Сохранить звучание оригинала <em>(только «По нотам»)</em>: <b id="c-noiseLabel">0</b>
+              <input type="range" id="c-noise" min="0" max="0.9" step="0.05" value="0">
+              <em>0 — звук создаётся заново; выше — генерация стартует с «зашумлённого» оригинала: ближе тембр и микс, но меньше смены стиля</em>
+            </label>
+            <label>Вариантов
+              <input type="number" id="c-batch" min="1" max="8" value="1">
+            </label>
+            <label class="check inline">
+              <input type="checkbox" id="c-keepall"> Сохранять все варианты
+            </label>
+            <label>Seed <em>(пусто = случайный)</em>
+              <input type="number" id="c-seed" placeholder="случайный">
+            </label>
+            <label>Шаги <em>(пусто = авто)</em>
+              <input type="number" id="c-steps" min="1" max="200" placeholder="авто">
+            </label>
+            <label>Guidance <em>(sft/base)</em>
+              <input type="number" id="c-guidance" min="1" max="15" step="0.5" value="7">
+            </label>
+            <label>Формат
+              <select id="c-format">
+                <option value="">по умолчанию</option>
+                <option value="flac">FLAC</option>
+                <option value="mp3">MP3</option>
+                <option value="wav">WAV</option>
+              </select>
+            </label>
+            <label>Сохранить в папку
+              <select id="c-folder"><option value="">Без папки</option></select>
+            </label>
+          </div>
+        </details>
+
+        <div class="form-actions">
+          <button type="submit" class="btn primary big" id="c-genBtn">Создать кавер</button>
+          <span class="form-msg" id="c-formMsg"></span>
+        </div>
+      </form>
+
+      <div class="card queue-card">
+        <h2>Очередь</h2>
+        <div class="job-list"><p class="muted">Пока пусто.</p></div>
       </div>
     </div>
   </section>

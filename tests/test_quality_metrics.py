@@ -60,3 +60,34 @@ class NoiseHeuristicsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CoverRetentionTests(unittest.TestCase):
+    def test_chroma_similarity_and_cover_score(self):
+        import tempfile
+        from pathlib import Path
+
+        import numpy as np
+        import soundfile as sf
+
+        from mysuno import quality
+
+        sr = 22050
+        t = np.arange(sr * 12) / sr
+        # «мелодия»: ноты меняются каждые 0.5 с; кавер — та же мелодия другим тембром; чужой — другие ноты
+        notes = np.repeat(np.random.default_rng(0).integers(0, 12, 24), sr // 2)[: len(t)]
+        other = np.repeat(np.random.default_rng(1).integers(0, 12, 24), sr // 2)[: len(t)]
+        f, g = 220 * 2 ** (notes / 12), 220 * 2 ** (other / 12)
+        with tempfile.TemporaryDirectory() as d:
+            src, cov, alien = (Path(d) / n for n in ("src.wav", "cov.wav", "alien.wav"))
+            sf.write(src, np.sin(2 * np.pi * np.cumsum(f) / sr).astype(np.float32), sr)
+            sf.write(cov, np.sign(np.sin(2 * np.pi * np.cumsum(f) / sr)).astype(np.float32) * 0.3, sr)
+            sf.write(alien, np.sin(2 * np.pi * np.cumsum(g) / sr).astype(np.float32), sr)
+            same, alike, unrelated = (quality.chroma_similarity(src, x) for x in (src, cov, alien))
+        self.assertGreater(same, 0.99)
+        self.assertGreater(alike, 0.5)
+        self.assertLess(unrelated, alike - 0.3)
+        aes = {"CE": 7.0, "PQ": 7.0, "CE_p10": 6.5, "noise_ratio": 0.0, "static": 0.0}
+        # узнаваемость поощряется только до потолка: копия не выигрывает у кавера за счёт сходства
+        self.assertGreater(quality.cover_score(aes, 0.4, 0.25), quality.cover_score(aes, 0.4, 0.0))
+        self.assertEqual(quality.cover_score(aes, 0.4, 0.9), quality.cover_score(aes, 0.4, quality.RETENTION_CAP))

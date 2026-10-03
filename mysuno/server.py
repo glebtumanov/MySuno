@@ -1,16 +1,18 @@
 """FastAPI-приложение MySuno (только localhost, один пользователь)."""
 from __future__ import annotations
 
+import json
 import mimetypes
 import threading
 from contextlib import asynccontextmanager
+from urllib.parse import unquote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, config, presets, translate
+from . import __version__, config, presets, sources, translate
 from . import lyrics as lyrics_tools
 from .db import get_library
 from .engine import get_engine, hardware
@@ -71,9 +73,22 @@ class GenerateRequest(BaseModel):
     adg: bool | None = None
     shift: float | None = Field(None, ge=1, le=5)
     bpm: int | None = Field(None, ge=30, le=300)
+    keyscale: str = Field("", max_length=40)   # тональность («C major»); пусто — решает LM
     format: str | None = None
     title: str = Field("", max_length=120)
     folder_id: int | None = None
+
+
+class CoverRequest(GenerateRequest):
+    """Кавер: исходник задаёт мелодию, ритм и структуру; стиль — жанры/описание; текст пуст → инструментал."""
+    source_id: str | None = None          # загруженный файл (data/sources)
+    source_track_id: str | None = None    # или трек из библиотеки
+    source_name: str = Field("", max_length=120)
+    start: float = Field(0, ge=0)          # фрагмент исходника, с
+    end: float | None = Field(None, ge=0)  # None = до конца
+    cover_mode: str = Field("auto", pattern="^(auto|cover|edit)$")   # авто | по нотам (cover) | перекраска (FlowEdit)
+    cover_strength: float = Field(0.6, ge=0, le=1)   # близость: доля шагов cover / окно FlowEdit
+    cover_noise: float = Field(0.0, ge=0, le=1)      # старт с зашумлённого исходника: ближе звучание/тембр
 
 
 class FolderBody(BaseModel):
@@ -109,6 +124,37 @@ def put_settings(patch: dict):
         return config.update_settings(patch)
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+UI_STATE_LIMIT = 256 * 1024
+
+
+@app.get("/api/ui-state")
+def get_ui_state():
+    """Последнее содержимое форм (без него страница берёт значения по умолчанию)."""
+    try:
+        return json.loads(config.UI_STATE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+@app.put("/api/ui-state")
+async def put_ui_state(request: Request):
+    """Сохраняет состояние форм: ключи верхнего уровня (create, cover) заменяются целиком."""
+    raw = await request.body()
+    if len(raw) > UI_STATE_LIMIT:
+        raise HTTPException(413, "Слишком большое состояние формы")
+    try:
+        patch = json.loads(raw or b"{}")
+    except ValueError as exc:
+        raise HTTPException(400, "Некорректный JSON") from exc
+    if not isinstance(patch, dict):
+        raise HTTPException(400, "Ожидается объект")
+    state = {**get_ui_state(), **{k: v for k, v in patch.items() if k in ("create", "cover")}}
+    tmp = config.UI_STATE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(config.UI_STATE_FILE)   # атомарно: обрыв посреди записи не портит файл
+    return {"ok": True}
 
 
 @app.post("/api/engine/load")
@@ -161,6 +207,96 @@ def generate(body: GenerateRequest):
         warnings += lyric_warnings
     if body.duration > 240:
         warnings.append("Треки длиннее 4 минут чаще получаются с повторами и «кашей» — надёжнее 1–3 минуты")
+    job = jobs.submit(request).to_dict()
+    job["warnings"] = warnings
+    return job
+
+
+# ------------------------------------------------------------------ каверы
+@app.post("/api/sources")
+async def upload_source(request: Request):
+    """Тело запроса — сам файл; имя в заголовке X-Filename (URL-encoded). 415 — пусть браузер пришлёт WAV."""
+    data = await request.body()
+    try:
+        return sources.save_upload(data, unquote(request.headers.get("x-filename", "")))
+    except sources.UnsupportedAudio as exc:
+        raise HTTPException(415, str(exc)) from exc
+    except sources.SourceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/sources")
+def list_sources():
+    """Загруженные исходники + сколько каверов из каждого сделано (по параметрам треков библиотеки)."""
+    used: dict[str, int] = {}
+    for track in library.list_tracks("all"):
+        req = (track.get("params") or {}).get("request") or {}
+        if req.get("task") == "cover" and req.get("source_id"):
+            used[req["source_id"]] = used.get(req["source_id"], 0) + 1
+    return {"sources": [{**s, "covers": used.get(s["id"], 0)} for s in sources.list_sources()]}
+
+
+class SourcePatch(BaseModel):
+    name: str = Field(..., max_length=120)
+
+
+@app.patch("/api/sources/{source_id}")
+def rename_source(source_id: str, body: SourcePatch):
+    try:
+        return sources.rename_source(source_id, body.name)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except sources.SourceError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/sources/{source_id}/audio")
+def source_audio(source_id: str):
+    try:
+        path = sources.source_file(source_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+
+
+@app.delete("/api/sources/{source_id}")
+def delete_source(source_id: str):
+    try:
+        sources.delete_source(source_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True}
+
+
+@app.post("/api/cover")
+def cover(body: CoverRequest):
+    settings = config.load_settings()
+    if bool(body.source_id) == bool(body.source_track_id):
+        raise HTTPException(400, "Загрузите файл или выберите трек из библиотеки")
+    try:
+        if body.source_id:
+            total = sources.get_source(body.source_id)["duration"]
+        else:
+            track = library.get_track(body.source_track_id)
+            if not track or not (config.TRACKS_DIR / track["filename"]).exists():
+                raise KeyError("Трек-исходник не найден")
+            total = track["duration"] or 0
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    end = min(body.end, total) if body.end else total
+    length = end - body.start
+    if length < sources.MIN_SECONDS:
+        raise HTTPException(400, f"Фрагмент слишком короткий — нужно хотя бы {sources.MIN_SECONDS:.0f} с")
+    if length > settings["max_duration"] + 1:
+        raise HTTPException(400, f"Фрагмент длиннее лимита из настроек ({settings['max_duration']} с) — выделите часть")
+    request = body.model_dump()
+    request.update(task="cover", duration=round(length, 2), auto_lyrics=False, thinking=False)
+    warnings = presets.check_conflicts(body.genres, body.moods)
+    if body.lyrics.strip():
+        request["lyrics"], lyric_warnings = lyrics_tools.normalize(body.lyrics)
+        warnings += lyric_warnings
+    if length > 240:
+        warnings.append("Фрагменты длиннее 4 минут чаще получаются с «кашей» — надёжнее 1–3 минуты")
     job = jobs.submit(request).to_dict()
     job["warnings"] = warnings
     return job

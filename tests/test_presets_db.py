@@ -7,6 +7,27 @@ from mysuno import presets
 from mysuno.db import Library
 
 
+class UniqueTitleTests(unittest.TestCase):
+    def test_suffixes(self):
+        with tempfile.TemporaryDirectory() as d:
+            lib = Library(Path(d) / "t.db")
+            add = lambda title: lib.add_track(title=lib.unique_title(title), filename="x.flac", fmt="flac")["title"]  # noqa: E731
+            self.assertEqual([add("Рок, Джаз") for _ in range(3)], ["Рок, Джаз", "Рок, Джаз 1", "Рок, Джаз 2"])
+            self.assertEqual(add("Рок"), "Рок")   # «Рок, Джаз …» не считается занятым «Рок»
+            self.assertEqual(add("100%_hit"), "100%_hit")
+            self.assertEqual(add("100%_hit"), "100%_hit 1")   # % и _ в названии не работают как шаблон LIKE
+            lib._conn.close()
+
+
+class AutoTitleTests(unittest.TestCase):
+    def test_genres_first(self):
+        from mysuno.jobs import _auto_title
+
+        self.assertEqual(_auto_title({"genres": ["rock", "jazz"], "prompt": "дождь"}), "Рок, Джаз")
+        self.assertEqual(_auto_title({"genres": [], "prompt": "дождь"}), "дождь")
+        self.assertEqual(_auto_title({}), "Без названия")
+
+
 class BuildCaptionTests(unittest.TestCase):
     def test_genres_vocal_description(self):
         caption, neg = presets.build_caption(["rock", "jazz"], ["sad"], "female", "rain in autumn")

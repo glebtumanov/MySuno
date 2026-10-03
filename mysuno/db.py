@@ -200,6 +200,22 @@ class Library:
             raise KeyError("Трек не найден")
         return track
 
+    def unique_title(self, base: str) -> str:
+        """Свободное название: «Рок», а если занято — «Рок 1», «Рок 2», … (первый свободный номер)."""
+        base = _clean_name(base, "Название")[:74]   # место под суффикс в пределах 80 символов
+        like = base.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + " %"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT title FROM tracks WHERE title = ? OR title LIKE ? ESCAPE '\\'", (base, like)
+            ).fetchall()
+        taken = {r[0] for r in rows}
+        if base not in taken:
+            return base
+        n = 1
+        while f"{base} {n}" in taken:
+            n += 1
+        return f"{base} {n}"
+
     def delete_track(self, track_id: str) -> str | None:
         """Удаляет запись и возвращает имя файла (файл удаляет вызывающий)."""
         with self._lock:

@@ -12,8 +12,10 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 TRACKS_DIR = DATA / "tracks"
 TMP_DIR = DATA / "tmp"
+SOURCES_DIR = DATA / "sources"   # загруженные исходники для каверов
 DB_FILE = DATA / "library.db"
 SETTINGS_FILE = DATA / "settings.json"
+UI_STATE_FILE = DATA / "ui_state.json"   # содержимое форм «Создать» и «Каверы» (переживает перезапуск сервера)
 ACE_ROOT = ROOT / "vendor" / "ACE-Step-1.5"
 CHECKPOINTS_DIR = ACE_ROOT / "checkpoints"
 WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -26,7 +28,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 if ACE_ROOT.exists() and str(ACE_ROOT) not in sys.path:
     sys.path.insert(0, str(ACE_ROOT))
 
-for _d in (DATA, TRACKS_DIR, TMP_DIR):
+for _d in (DATA, TRACKS_DIR, TMP_DIR, SOURCES_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 DIT_MODELS = ("acestep-v15-turbo", "acestep-v15-sft", "acestep-v15-base")

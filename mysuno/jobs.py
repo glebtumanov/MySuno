@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from . import config, presets
+from . import config, presets, sources
 from .db import Library
 from .engine import AceEngine, Cancelled
 
@@ -55,7 +55,7 @@ def _job_title(job: Job) -> str:
     if job.kind == "load":
         return "Загрузка моделей"
     req = job.request
-    return (req.get("title") or req.get("prompt") or "Без названия")[:60]
+    return ((req.get("title") or "").strip() or _auto_title(req))[:60]
 
 
 class JobManager:
@@ -160,9 +160,25 @@ class JobManager:
         req = job.request
         tmp = config.TMP_DIR / job.id
         try:
+            if req.get("task") == "cover":
+                progress(0.01, "Подготовка исходника…")
+                src, length = sources.cut_segment(self._source_path(req), req.get("start") or 0, req.get("end"), tmp)
+                req = {**req, "_src_path": str(src), "duration": round(length, 2)}
             self._generate_and_store(job, req, settings, progress, tmp)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    def _source_path(self, req: dict[str, Any]) -> Path:
+        if req.get("source_id"):
+            try:
+                return sources.source_file(req["source_id"])
+            except KeyError as exc:
+                raise sources.SourceError("Файл-исходник удалён") from exc
+        track = self.library.get_track(req.get("source_track_id") or "")
+        path = config.TRACKS_DIR / track["filename"] if track else None
+        if not path or not path.exists():
+            raise sources.SourceError("Трек-исходник удалён из библиотеки")
+        return path
 
     def _generate_and_store(self, job: Job, req: dict[str, Any], settings: dict[str, Any], progress,
                             tmp: Path) -> None:
@@ -170,13 +186,12 @@ class JobManager:
         progress(0.99, "Сохранение в библиотеку…")
 
         base_title = (req.get("title") or "").strip() or _auto_title(req)
-        n = len(result["tracks"])
-        for i, t in enumerate(result["tracks"], start=1):
+        for t in result["tracks"]:
             src = Path(t["path"])
             track_id = uuid.uuid4().hex[:16]
             dst = config.TRACKS_DIR / f"{track_id}{src.suffix}"
             shutil.move(str(src), str(dst))
-            title = base_title if n == 1 else f"{base_title} ({i})"
+            title = self.library.unique_title(base_title)   # занято → «… 1», «… 2»
             track = self.library.add_track(
                 track_id=track_id,
                 title=title,
@@ -189,12 +204,36 @@ class JobManager:
                 prompt=req.get("prompt", ""),
                 caption=result["caption"],
                 lyrics=result["lyrics"],
-                params={"request": req, "negative": result["negative"],
+                params={"request": {k: v for k, v in req.items() if not k.startswith("_")}, "negative": result["negative"],
                         "description_en": result["description_en"], "plan": result["plan"],
                         "stages": result.get("stages"), "time_costs": _round_costs(result.get("time_costs")),
-                        "score": t.get("score")},
+                        "score": t.get("score"), "method": t.get("method"), "cover": _cover_info(req, result, t),
+                        # фактические параметры генерации этого трека: всё, что ушло в ACE (seed, шаги, CFG, BPM и
+                        # тональность от LM…), метаданные LM, конфиг батча и настройки движка на момент генерации
+                        "generation": {"ace": t.get("ace") or {}, **(t.get("generation") or result.get("generation") or {})},
+                        "batch_index": i, "batch_size": n, "ranked": result.get("ranked", False)},
             )
             job.track_ids.append(track["id"])
+
+
+def _cover_info(req: dict[str, Any], result: dict[str, Any], track: dict[str, Any]) -> dict[str, Any] | None:
+    """Параметры, специфичные для кавера: исходник, фрагмент, способ этого трека и что LM услышала в исходнике."""
+    if req.get("task") != "cover":
+        return None
+    start = float(req.get("start") or 0)
+    length = float(req.get("duration") or 0)
+    return {
+        **(result.get("cover") or {}),
+        "method": track.get("method"),
+        "source_id": req.get("source_id"),
+        "source_track_id": req.get("source_track_id"),
+        "source_name": req.get("source_name"),
+        "start": round(start, 2),
+        "end": round(start + length, 2),
+        "length": round(length, 2),
+        "strength": req.get("cover_strength"),
+        "noise": req.get("cover_noise"),
+    }
 
 
 def _round_costs(costs: dict[str, Any] | None) -> dict[str, float]:
@@ -202,9 +241,13 @@ def _round_costs(costs: dict[str, Any] | None) -> dict[str, float]:
 
 
 def _auto_title(req: dict[str, Any]) -> str:
+    if req.get("task") == "cover":
+        return f"Кавер: {(req.get('source_name') or 'исходник')[:50]}"
+    labels = {i: l for i, l, _ in presets.GENRES}
+    genres = [labels[g] for g in req.get("genres", []) if g in labels]
+    if genres:   # название по умолчанию — жанры
+        return ", ".join(genres[:3])
     prompt = (req.get("prompt") or "").strip()
     if prompt:
         return prompt[:40] + ("…" if len(prompt) > 40 else "")
-    labels = {i: l for i, l, _ in presets.GENRES}
-    genres = [labels[g] for g in req.get("genres", []) if g in labels]
-    return ", ".join(genres[:2]) or "Без названия"
+    return "Без названия"

@@ -275,3 +275,46 @@ def total_score(aes: dict[str, Any], lyr: dict[str, float] | None, clap: float |
     if clap is not None:
         t += CLAP_WEIGHT * clap
     return float(t)
+
+
+# ---------------------------------------------------------------- узнаваемость оригинала в кавере (хрома)
+RETENTION_WEIGHT = 2.0   # +0.1 похожести гармонии ≈ +0.2 балла
+RETENTION_CAP = 0.30     # выше — уже «копия», а не кавер: дальше не поощряем
+
+
+def _chroma(path: str | Path, n_fft: int = 8192, hop: int = 4096) -> np.ndarray:
+    """Хромаграмма 12×кадры по STFT: энергия 55–2000 Гц, свёрнутая в классы высот; нормирована и центрирована."""
+    y, sr = sf.read(str(path), dtype="float32", always_2d=True)
+    y = y.mean(1)
+    if len(y) < n_fft:
+        return np.zeros((12, 0), dtype=np.float32)
+    frames = np.lib.stride_tricks.sliding_window_view(y, n_fft)[::hop] * np.hanning(n_fft).astype(np.float32)
+    spec = np.abs(np.fft.rfft(frames, axis=1)) ** 2
+    freqs = np.fft.rfftfreq(n_fft, 1 / sr)
+    band = (freqs >= 55) & (freqs <= 2000)
+    pc = np.round(12 * np.log2(freqs[band] / 440.0)).astype(int) % 12
+    sb = spec[:, band]
+    chroma = np.stack([sb[:, pc == k].sum(1) for k in range(12)]).astype(np.float32)
+    chroma = np.sqrt(chroma)
+    chroma /= np.linalg.norm(chroma, axis=0) + 1e-8
+    return chroma - chroma.mean(0)
+
+
+def chroma_similarity(a: str | Path, b: str | Path) -> float:
+    """Похожесть гармонии по времени 1:1 (кавер той же длины): ~0 — не связаны, 0.2–0.3 — узнаваемо, >0.7 — почти копия."""
+    ca, cb = _chroma(a), _chroma(b)
+    n = min(ca.shape[1], cb.shape[1])
+    if n == 0:
+        return 0.0
+    ca, cb = ca[:, :n], cb[:, :n]
+    cos = (ca * cb).sum(0) / (np.linalg.norm(ca, axis=0) * np.linalg.norm(cb, axis=0) + 1e-8)
+    return float(cos.mean())
+
+
+def cover_score(aes: dict[str, Any], clap: float, retention: float, lyr: dict[str, float] | None = None) -> float:
+    """Балл кавера: эстетика + новый стиль (CLAP) + узнаваемость оригинала (до потолка) + разборчивость текста.
+
+    Без узнаваемости ранжирование выбирало «чистые» варианты, где от мелодии исходника ничего не осталось,
+    а без потолка — почти копии исходника без смены стиля (замеры: scripts/cover_lab.py, data/lab/cover_results.jsonl).
+    """
+    return total_score(aes, lyr, clap) + RETENTION_WEIGHT * min(retention, RETENTION_CAP)

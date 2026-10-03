@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import gc
 import os
+import random
 import threading
 import time
 from pathlib import Path
@@ -18,12 +19,13 @@ ProgressCb = Callable[[float, str], None]
 
 TURBO_STEPS = 8
 QUALITY_STEPS = 50     # sft/base по документации ACE: 32–64 шага
+EDIT_STEPS = 60        # FlowEdit на sft/base: документация ACE рекомендует ≥60
 MAX_NOISE_RETRIES = 2
 NOISE_RATIO_LIMIT = 0.25   # доля 10-с окон с флэтностью > 0.15, после которой результат считаем «кашей»
 NOISE_FLAT_LIMIT = 0.10    # или медианная флэтность по треку
 STATIC_LIMIT = 0.60        # доля почти неизменных соседних 10-с окон = «дрон» (у нормальных треков < 0.3)
 LM_BATCH_CHUNK = 4         # элементов за проход LM при батче (с CFG = 8 строк → быстрый декодер)
-MAX_EXTRA_BATCH_CALLS = 4  # сколько раз догенерировать недостающих кандидатов
+MAX_EXTRA_BATCH_CALLS = 7  # сколько раз догенерировать недостающих кандидатов (×8 порциями по 1 — 1+7)
 LM_CFG_DEFAULT = 4.0   # ACE по умолчанию 2.0; на замерах (300 с) 2.0 → 7.18, ≥3 → 7.6–7.7: CFG LM подавляет зацикливание кодов
 
 
@@ -84,9 +86,12 @@ def hardware(refresh: bool = False) -> dict[str, Any]:
     if info["cuda"]:
         import torch
 
-        free, total = torch.cuda.mem_get_info(0)
-        info["gpus"][0]["free_gb"] = round(free / 2**30, 1)
-        info["gpus"][0]["vram_gb"] = round(total / 2**30, 1)
+        try:
+            free, total = torch.cuda.mem_get_info(0)
+            info["gpus"][0]["free_gb"] = round(free / 2**30, 1)
+            info["gpus"][0]["vram_gb"] = round(total / 2**30, 1)
+        except RuntimeError:   # контекст CUDA сломан (фатальная ошибка) — статус всё равно должен отдаваться
+            info["gpus"][0]["free_gb"] = None
     return info
 
 
@@ -161,6 +166,7 @@ class AceEngine:
         self._safe_mode = False                        # включается после нехватки VRAM
         self._cancel = threading.Event()               # запрос отмены текущей генерации
         self._fatal: str | None = None                 # фатальная ошибка CUDA: помогает только перезапуск процесса
+        self._understood: dict[tuple, dict[str, Any]] = {}   # описание исходников каверов от LM (по фрагменту)
         self.state = "unloaded"      # unloaded | loading | ready | error
         self.last_error: str | None = None
         self.load_seconds: float | None = None
@@ -322,13 +328,20 @@ class AceEngine:
         return None
 
     @staticmethod
-    def _chunk(left: int, duration: float) -> int:
+    def _chunk(left: int, duration: float, cover: bool | str = False) -> int:
         """Сколько кандидатов генерировать за один проход: не больше, чем безопасно по VRAM (та же формула, что у
-        «VRAM guard» ACE) и чем помещается в быстрый LM-декодер."""
+        «VRAM guard» ACE) и чем помещается в быстрый LM-декодер.
+
+        Кавер прожорливее: латенты исходника + вторая (не-cover) текстовая обусловленность. Замер (sft, 60 с):
+        ~1.15 ГБ на вариант; с формулой ACE порция из 3 упиралась в потолок 16-ГБ карты, и Windows уводил память
+        в общую ОЗУ — диффузия замедлялась в ~15 раз.
+        """
         try:
             from acestep.gpu_config import get_effective_free_vram_gb
 
-            per_sample = 0.5 + max(0.0, 0.15 * (duration - 60.0) / 60.0)
+            per_sample = 1.2 * max(1.0, duration / 60.0) if cover else 0.5 + max(0.0, 0.15 * (duration - 60.0) / 60.0)
+            if cover == "edit":
+                per_sample *= 2   # FlowEdit: парные ветви (исходник и цель) на каждом шаге
             safe = max(1, int((get_effective_free_vram_gb() - 1.5) / per_sample))
         except Exception:  # noqa: BLE001 — нет CUDA/модуля: не ограничиваем
             safe = LM_BATCH_CHUNK
@@ -372,11 +385,11 @@ class AceEngine:
                 m.to(getattr(self.dit, "device", "cuda"))
 
     def _rank(self, tracks: list[dict[str, Any]], lyrics: str, instrumental: bool, caption: str,
-              progress: ProgressCb) -> None:
+              progress: ProgressCb, src: str | None = None) -> None:
         """Оценивает кандидатов и сортирует: лучший первым.
 
         Сводный балл: эстетика Audiobox (+ штрафы за шум/статику), соответствие описанию (CLAP),
-        для вокала — разборчивость русского текста (Whisper).
+        для вокала — разборчивость русского текста (Whisper); для кавера (src) — узнаваемость оригинала.
         """
         from . import quality
 
@@ -393,9 +406,12 @@ class AceEngine:
                     lyr = None
                     if sing:
                         lyr = quality.lyrics_match(quality.transcribe(track["path"], device=device), lyrics)
+                    retention = quality.chroma_similarity(src, track["path"]) if src else None
+                    total = quality.total_score(aes, lyr, clap) if src is None                         else quality.cover_score(aes, clap, retention, lyr)
                     track["score"] = {
-                        "total": round(quality.total_score(aes, lyr, clap), 3),
+                        "total": round(total, 3),
                         "clap": round(clap, 3),
+                        **({"retention": round(retention, 3)} if retention is not None else {}),
                         **{k: round(float(aes[k]), 3) for k in ("CE", "PQ", "CE_p10", "noise_ratio", "static")},
                         **({k: round(v, 3) for k, v in lyr.items()} if lyr else {}),
                     }
@@ -482,7 +498,7 @@ class AceEngine:
         """Выполняет задачу; возвращает {"tracks": [...], "caption", "lyrics", ...}."""
         self._cancel.clear()
         try:
-            return self._generate(req, settings, progress, out_dir, safe=False)
+            return self._dispatch(req, settings, progress, out_dir, safe=False)
         except Cancelled:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -492,8 +508,128 @@ class AceEngine:
                 logger.warning("Нехватка VRAM — перезагружаю модели в экономном режиме")
                 self.unload(reset_safe=False)
                 self._safe_mode = True   # остаёмся в нём, пока пользователь не нажмёт «Выгрузить»
-                return self._generate(req, settings, progress, out_dir, safe=True)
+                return self._dispatch(req, settings, progress, out_dir, safe=True)
             raise
+
+    def _dispatch(self, req: dict[str, Any], settings: dict[str, Any], progress: ProgressCb,
+                  out_dir: Path, safe: bool) -> dict[str, Any]:
+        if req.get("task") == "cover":
+            return self._generate_cover(req, settings, progress, out_dir, safe)
+        return self._generate(req, settings, progress, out_dir, safe)
+
+    # ---- каверы ----
+    def _understand(self, req: dict[str, Any]) -> dict[str, Any] | None:
+        """Описание исходника от LM (жанр, инструменты, текст): нужно FlowEdit как «откуда» перекрашивать.
+
+        Исходник → семантические коды (токенайзер DiT) → understand_music. ~5 с; кэш по фрагменту.
+        """
+        if not (self.llm is not None and getattr(self.llm, "llm_initialized", False)):
+            return None
+        key = (req.get("source_id") or req.get("source_track_id") or req["_src_path"],
+               round(float(req.get("start") or 0), 2), req.get("end"))
+        if key in self._understood:
+            return self._understood[key]
+        from acestep.inference import understand_music
+
+        codes = self.dit.convert_src_audio_to_codes(req["_src_path"]) or ""
+        if "<|audio_code_" not in codes:
+            logger.warning("Исходник не перевёлся в коды: {}", codes[:200])
+            return None
+        self.check_cancel()
+        res = understand_music(self.llm, codes, use_constrained_decoding=True)
+        self.check_cancel()
+        if not res.success or not (res.caption or "").strip():
+            logger.warning("LM не описала исходник: {}", res.error or res.status_message)
+            return None
+        und = {"caption": res.caption.strip(), "lyrics": (res.lyrics or "").strip(),
+               "bpm": res.bpm, "keyscale": res.keyscale}
+        if len(self._understood) > 32:
+            self._understood.clear()
+        self._understood[key] = und
+        logger.info("Исходник кавера: {}", und["caption"][:200])
+        return und
+
+    def _generate_cover(self, req: dict[str, Any], settings: dict[str, Any], progress: ProgressCb,
+                        out_dir: Path, safe: bool) -> dict[str, Any]:
+        """Кавер двумя способами, лучший выбирается оценкой (замеры: scripts/cover_lab.py).
+
+        «По нотам» (task cover): DiT получает семантические коды исходника. Хорошо, когда исходник «понятен»
+        модели (напр. сгенерирован ей же): уверенная смена стиля при узнаваемой гармонии. На живых сложных записях
+        (оркестр) коды противоречат новому стилю — получается каша без мелодии оригинала.
+        «Перекраска» (FlowEdit): исходник плавно переводится из своего описания (его даёт LM) в целевое — чистый звук
+        и сохранённая гармония на живых записях, но на «родных» исходниках стиль меняется слабо.
+        Авто: часть вариантов каждым способом; ранжирование учитывает и узнаваемость оригинала.
+        """
+        with self._lock:
+            t0 = time.time()
+            self.ensure_loaded(settings, progress, safe=safe or self._safe_mode)
+            mode = req.get("cover_mode") if req.get("cover_mode") in ("auto", "cover", "edit") else "auto"
+            batch = max(1, min(8, int(req.get("batch", 1))))
+            und = None
+            if mode in ("auto", "edit"):
+                progress(0.03, "LM слушает исходник…")
+                und = self._understand(req)
+                if und is None:
+                    if mode == "edit":
+                        raise EngineError("Для «перекраски» нужна языковая модель (LM): она описывает исходник. "
+                                          "Включите её в настройках или выберите способ «По нотам»")
+                    mode = "cover"
+            if mode == "auto":
+                n = max(2, batch)   # хотя бы по одному варианту каждым способом
+                plan = [("cover", n - n // 2), ("edit", n // 2)]
+            else:
+                plan = [(mode, batch)]
+            # «Близость к оригиналу» для перекраски: окно FlowEdit [0, n_max], меньше n_max — ближе к исходнику
+            closeness = float(req.get("cover_strength", 0.6))
+            n_max = req.get("flow_n_max")
+            n_max = float(n_max) if n_max is not None else min(1.0, max(0.6, 1.16 - 0.4 * closeness))
+
+            labels = {"cover": "По нотам", "edit": "Перекраска"}
+            total, done = sum(k for _, k in plan), 0
+            parts, tracks = [], []
+            for method, k in plan:
+                sub = {**req, "cover_mode": method, "batch": k, "rank": k > 1, "_skip_rank": True, "keep_all": True}
+                if method == "edit":
+                    sub.update(source_caption=und["caption"], source_lyrics=und["lyrics"] or "[Instrumental]",
+                               flow_n_max=n_max)
+                a, b = done / total, (done + k) / total
+
+                def sub_progress(v: float, desc: str, _a=a, _b=b, _m=method) -> None:
+                    progress(0.05 + 0.83 * (_a + (_b - _a) * v), f"{labels[_m]}: {desc}")
+
+                res = self._generate(sub, settings, sub_progress, out_dir / method, safe=safe)
+                for track in res["tracks"]:
+                    track["method"] = method
+                    track["generation"] = res.get("generation")   # у способов разные конфиги — храним свой у каждого
+                tracks += res["tracks"]
+                parts.append(res)
+                done += k
+
+            first = parts[0]
+            ranked = False
+            if len(tracks) > 1:
+                t_rank = time.time()
+                lyrics = first["lyrics"]
+                self._rank(tracks, lyrics, lyrics == "[Instrumental]", first["caption"], progress, src=req["_src_path"])
+                ranked = True
+                if not req.get("keep_all"):
+                    for extra_track in tracks[1:]:
+                        Path(extra_track["path"]).unlink(missing_ok=True)
+                    tracks = tracks[:1]
+                rank_seconds = round(time.time() - t_rank, 2)
+            stages: dict[str, float] = {}
+            for part in parts:
+                for k, v in (part.get("stages") or {}).items():
+                    stages[k] = round(stages.get(k, 0) + v, 2)
+            if ranked:
+                stages["rank"] = rank_seconds
+            stages["total"] = round(time.time() - t0, 2)
+            return {**first, "tracks": tracks, "ranked": ranked, "stages": stages,
+                    "gen_seconds": round(time.time() - t0, 1),
+                    "cover": {"mode": req.get("cover_mode") or "auto", "methods": [m for m, _ in plan],
+                              "flow_n_max": round(n_max, 3), "closeness": closeness,
+                              "source_caption": und["caption"] if und else None,
+                              "source_understanding": _jsonable(und) if und else None}}
 
     def _generate(self, req: dict[str, Any], settings: dict[str, Any], progress: ProgressCb,
                   out_dir: Path, safe: bool) -> dict[str, Any]:
@@ -517,13 +653,18 @@ class AceEngine:
             llm_ready = bool(self.llm is not None and getattr(self.llm, "llm_initialized", False))
             turbo = "turbo" in self.plan["dit"]
 
-            instrumental = presets.is_instrumental(req.get("vocal") or "auto") or bool(req.get("instrumental"))
+            cover = req.get("task") == "cover"
+            # Способ кавера: "cover" — DiT на семантических кодах исходника (+ старт с зашумлённого исходника);
+            # "edit" — FlowEdit поверх text2music: исходник «перекрашивается» из своего описания в целевое.
+            edit_mode = cover and req.get("cover_mode") == "edit"
             lyrics = (req.get("lyrics") or "").strip()
+            instrumental = (presets.is_instrumental(req.get("vocal") or "auto") or bool(req.get("instrumental"))
+                            or (cover and not lyrics))   # кавер без текста — инструментал
             temperature = float(req.get("temperature") if req.get("temperature") is not None else 0.85)
             lm_sample: dict[str, Any] = {}
             if instrumental:
                 lyrics = "[Instrumental]"
-            elif not lyrics and req.get("auto_lyrics", True) and llm_ready:
+            elif not lyrics and req.get("auto_lyrics", True) and llm_ready and not cover:
                 progress(0.2, "LM пишет текст песни…")
                 sample = create_sample(self.llm, query=caption, instrumental=False,
                                        vocal_language="ru", temperature=temperature)
@@ -533,9 +674,17 @@ class AceEngine:
                 else:
                     logger.warning("create_sample: {}", sample.error or sample.status_message)
 
-            steps = req.get("steps") or (TURBO_STEPS if turbo else QUALITY_STEPS)
+            steps = req.get("steps") or (TURBO_STEPS if turbo else EDIT_STEPS if edit_mode else QUALITY_STEPS)
             seed = req.get("seed")
             use_random = seed is None or int(seed) < 0
+            user_random = use_random
+            batch = max(1, min(8, int(req.get("batch", 1))))
+            rank_mode = bool(req.get("rank")) and batch > 1
+            # Одиночный трек: seed выбираем сами и им же сеем LM (ACE в одиночном режиме генератор LM не сеет) —
+            # тогда сохранённый seed повторяет трек целиком: и коды LM, и шум диффузии.
+            pin_seed = batch == 1
+            if pin_seed and use_random:
+                seed, use_random = random.randrange(2**32), False
             duration = float(req.get("duration", 60))
             bpm = req.get("bpm") or lm_sample.get("bpm") or None
 
@@ -549,8 +698,30 @@ class AceEngine:
                 if req.get(key) not in (None, ""):
                     extra[attr] = req[key]
 
+            if cover:
+                # Мелодию, ритм и структуру задаёт исходник; LM для cover ACE пропускает сам. Инструкцию задачи
+                # ACE подставляет только при audio_codes — для src_audio передаём её явно.
+                from acestep.constants import TASK_INSTRUCTIONS
+
+                extra["src_audio"] = req["_src_path"]
+                if edit_mode:
+                    extra.update(
+                        flow_edit_morph=True,
+                        flow_edit_source_caption=req.get("source_caption") or "",
+                        flow_edit_source_lyrics=req.get("source_lyrics") or "[Instrumental]",
+                        flow_edit_n_min=float(req.get("flow_n_min") or 0.0),
+                        flow_edit_n_max=float(req.get("flow_n_max") if req.get("flow_n_max") is not None else 1.0),
+                        flow_edit_n_avg=int(req.get("flow_n_avg") or 1),
+                    )
+                else:
+                    extra.update(
+                        instruction=TASK_INSTRUCTIONS["cover"],
+                        audio_cover_strength=float(req.get("cover_strength", 0.5)),
+                        cover_noise_strength=float(req.get("cover_noise") or 0.0),
+                    )
+
             params = GenerationParams(
-                task_type="text2music",
+                task_type="cover" if cover and not edit_mode else "text2music",
                 caption=caption,
                 lyrics=lyrics,
                 instrumental=instrumental,
@@ -562,23 +733,21 @@ class AceEngine:
                 guidance_scale=float(req.get("guidance") or 7.0),
                 shift=float(req.get("shift") or 3.0),
                 seed=-1 if use_random else int(seed),
-                thinking=bool(req.get("thinking", True)) and llm_ready,
+                thinking=bool(req.get("thinking", True)) and llm_ready and not cover,
                 lm_temperature=temperature,
                 lm_cfg_scale=float(req.get("lm_cfg_scale") or LM_CFG_DEFAULT),
                 lm_negative_prompt=negative,
                 # LM переписывает caption в «родной» для DiT формат (на таких описаниях DiT обучался)
-                use_cot_caption=bool(req.get("cot_caption", True)),
+                use_cot_caption=bool(req.get("cot_caption", True)) and not cover,
                 use_cot_language=False,
-                use_cot_metas=bool(req.get("cot_metas", True)),
+                use_cot_metas=bool(req.get("cot_metas", True)) and not cover,
                 **extra,
             )
-            batch = max(1, min(8, int(req.get("batch", 1))))
             out_format = req.get("format") or settings["audio_format"]
-            rank_mode = bool(req.get("rank")) and batch > 1
             if rank_mode:
                 use_random = True    # кандидаты должны различаться
             cfg = GenerationConfig(
-                batch_size=self._chunk(batch, duration) if rank_mode else batch,
+                batch_size=self._chunk(batch, duration, "edit" if edit_mode else cover) if rank_mode else batch,
                 allow_lm_batch=batch > 1,
                 lm_batch_chunk_size=LM_BATCH_CHUNK,   # ≤4 элементов (8 строк) за проход LM — укладывается в быстрый декодер
                 use_random_seed=use_random,
@@ -605,10 +774,12 @@ class AceEngine:
             t_gen = time.time()
             stages["prepare"] = round(t_gen - t0 - stages["translate"], 2)
             # Страж против «каши»: для одиночного трека со случайным seed проверяем спектр и при шуме пробуем ещё раз.
-            retries = MAX_NOISE_RETRIES if (req.get("guard", True) and batch == 1 and use_random) else 0
+            retries = MAX_NOISE_RETRIES if (req.get("guard", True) and batch == 1 and user_random) else 0
             ambient_ok = bool({"ambient", "lofi", "classical"} & set(req.get("genres") or []))   # там статика — норма
             attempt = 0
             while True:
+                if pin_seed:
+                    _seed_lm(int(seed))
                 result = generate_music(self.dit, self.llm, params, cfg, save_dir=str(out_dir), progress=cb)
                 self.check_cancel()   # ACE глотает исключения внутри цикла LM и возвращает «ошибку» — различаем отмену
                 if not result.success:
@@ -621,12 +792,14 @@ class AceEngine:
                 progress(floor, f"Результат неудачный ({reason.split(' (')[0]}) — пробую ещё раз ({attempt}/{retries})…")
                 for a in result.audios:
                     Path(a.get("path") or "").unlink(missing_ok=True)
+                seed = random.randrange(2**32)   # заново — с новым seed
+                params.seed, cfg.seeds = seed, [seed]
             audios = list(result.audios)
             # Недостающих кандидатов догенерируем порциями, посильными для свободной VRAM (LM для каждой порции
             # считается заново, зато ничего не выбрасывается).
             extra_calls = 0
             while rank_mode and len(audios) < batch and extra_calls < MAX_EXTRA_BATCH_CALLS:
-                cfg.batch_size = self._chunk(batch - len(audios), duration)
+                cfg.batch_size = self._chunk(batch - len(audios), duration, "edit" if edit_mode else cover)
                 extra_calls += 1
                 progress(floor, f"Догенерирую варианты ({len(audios)}/{batch})…")
                 more = generate_music(self.dit, self.llm, params, cfg, save_dir=str(out_dir), progress=cb)
@@ -650,10 +823,11 @@ class AceEngine:
                     "path": audio["path"],
                     "seed": (audio.get("params") or {}).get("seed"),
                     "duration": round(dur, 2),
+                    "ace": _jsonable(audio.get("params") or {}, drop=_ACE_DROP),   # всё, что ушло в ACE для этого трека
                 })
 
             ranked = False
-            if len(tracks) > 1 and req.get("rank"):
+            if len(tracks) > 1 and req.get("rank") and not req.get("_skip_rank"):
                 t_rank = time.time()
                 self._rank(tracks, lyrics, instrumental, caption, progress)
                 stages["rank"] = round(time.time() - t_rank, 2)
@@ -679,7 +853,51 @@ class AceEngine:
                 "gen_seconds": round(time.time() - t0, 1),
                 "plan": dict(self.plan or {}),
                 "time_costs": (result.extra_outputs or {}).get("time_costs", {}),
+                "generation": {
+                    "lm_metadata": _jsonable((result.extra_outputs or {}).get("lm_metadata") or {}),
+                    "config": _jsonable(cfg.to_dict()),
+                    # одиночная генерация с seed, которым посеяна и LM: тот же запрос + seed дают тот же трек.
+                    # Варианты пакета так не повторить — LM и общие шаги пакета ACE считает иначе, чем одиночный трек
+                    "reproducible": pin_seed,
+                    "lm_codes_rep_penalty": float(req.get("lm_rep_penalty") or 1.0),
+                    "out_format": out_format,
+                    "lm_sample": _jsonable(lm_sample),
+                    "settings": _jsonable(settings),
+                },
             }
+
+
+# Тяжёлые или бесполезные для повтора поля параметров ACE: LM-коды (десятки КБ), путь к временному исходнику
+_ACE_DROP = frozenset({"audio_codes", "src_audio", "reference_audio"})
+_SKIP = object()
+
+
+def _jsonable(value: Any, drop: frozenset[str] = frozenset()) -> Any:
+    """Приводит параметры к JSON: тензоры и прочие объекты отбрасываются, numpy/torch-скаляры → числа."""
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if str(k) not in drop and (v := _jsonable(v)) is not _SKIP:
+                out[str(k)] = v
+        return out
+    if isinstance(value, (list, tuple)):
+        return [v for v in map(_jsonable, value) if v is not _SKIP]
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if getattr(value, "ndim", None) == 0 and hasattr(value, "item"):
+        return value.item()
+    return _SKIP
+
+
+def _seed_lm(seed: int) -> None:
+    """Сеет глобальный генератор torch: от него сэмплирует LM (и CoT-метаданные, и аудиокоды)."""
+    import torch
+
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def _is_oom(exc: BaseException) -> bool:
