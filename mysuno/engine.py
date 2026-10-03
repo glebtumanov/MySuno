@@ -21,6 +21,9 @@ TURBO_STEPS = 8
 QUALITY_STEPS = 50     # sft/base по документации ACE: 32–64 шага
 EDIT_STEPS = 60        # FlowEdit на sft/base: документация ACE рекомендует ≥60
 MAX_NOISE_RETRIES = 2
+LYRICS_RETRIES = 2       # сколько раз переспросить LM, если вместо текста песни она вернула одни теги
+LYRICS_LANGUAGES = {"en": "English", "ru": "Russian", "fr": "French", "es": "Spanish", "pt": "Portuguese", "it": "Italian",
+                    "de": "German", "ko": "Korean", "ja": "Japanese", "la": "Latin", "uk": "Ukrainian", "zh": "Chinese"}
 NOISE_RATIO_LIMIT = 0.25   # доля 10-с окон с флэтностью > 0.15, после которой результат считаем «кашей»
 NOISE_FLAT_LIMIT = 0.10    # или медианная флэтность по треку
 STATIC_LIMIT = 0.60        # доля почти неизменных соседних 10-с окон = «дрон» (у нормальных треков < 0.3)
@@ -667,8 +670,13 @@ class AceEngine:
                 lyrics = "[Instrumental]"
             elif not lyrics and req.get("auto_lyrics", True) and llm_ready and not cover:
                 progress(0.2, "LM пишет текст песни…")
-                sample = create_sample(self.llm, query=caption, instrumental=False,
-                                       vocal_language=language, temperature=temperature)
+                # LM иногда вместо текста отдаёт одни теги ([Instrumental], [Intro]…) — тогда вокала не будет; повторяем
+                for attempt in range(1 + LYRICS_RETRIES):
+                    sample = create_sample(self.llm, query=_with_language(caption, language), instrumental=False,
+                                           vocal_language=language, temperature=temperature)
+                    if not (sample.success and sample.lyrics) or _has_sung_lines(sample.lyrics):
+                        break
+                    logger.info("LM не написала текст (попытка {}), повторяю", attempt + 1)
                 if sample.success and sample.lyrics:
                     lyrics = sample.lyrics
                     lm_sample = {"bpm": sample.bpm, "keyscale": sample.keyscale}
@@ -739,7 +747,7 @@ class AceEngine:
                 lm_cfg_scale=float(req.get("lm_cfg_scale") or LM_CFG_DEFAULT),
                 lm_negative_prompt=negative,
                 # LM переписывает caption в «родной» для DiT формат (на таких описаниях DiT обучался)
-                use_cot_caption=bool(req.get("cot_caption", True)) and not cover,
+                use_cot_caption=bool(req.get("cot_caption", True)) and not cover and not presets.literal_caption(req.get("genres") or []),
                 use_cot_language=False,
                 use_cot_metas=bool(req.get("cot_metas", True)) and not cover,
                 **extra,
@@ -890,6 +898,17 @@ def _jsonable(value: Any, drop: frozenset[str] = frozenset()) -> Any:
     if getattr(value, "ndim", None) == 0 and hasattr(value, "item"):
         return value.item()
     return _SKIP
+
+
+def _with_language(caption: str, language: str) -> str:
+    """Запрос на текст песни с явным языком: ACE ограничивает язык только в метаданных, а сам текст LM пишет как хочет."""
+    name = LYRICS_LANGUAGES.get(language)
+    return f"{caption}, {name} lyrics" if name else caption
+
+
+def _has_sung_lines(lyrics: str) -> bool:
+    """Есть ли в тексте хоть одна строка, которую поют (не тег секции вроде [Verse] или [Instrumental])."""
+    return any(line.strip() and not line.strip().startswith("[") for line in (lyrics or "").splitlines())
 
 
 def _seed_lm(seed: int) -> None:

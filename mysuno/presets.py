@@ -5,7 +5,8 @@ from __future__ import annotations
 GENRES: list[tuple[str, str, str]] = [
     ("pop", "Pop", "pop, catchy melody"),
     ("ruspop", "Русская эстрада", "russian pop, estrada"),
-    ("sovpop", "Советская эстрада", "soviet pop, 1970s estrada, vintage orchestral pop, warm brass and strings"),
+    ("sovpop", "Советская эстрада", "1970s-1980s soviet VIA pop-rock, melodic male vocals, rich vocal harmonies, analog synthesizers, "
+     "clean electric guitars, live drums, folk influences, warm nostalgic sound, uplifting and slightly dramatic"),
     ("rock", "Rock", "rock, electric guitars, live drums"),
     ("hardrock", "Hard rock", "hard rock, distorted guitars, powerful drums"),
     ("metal", "Metal", "heavy metal, aggressive guitars, double bass drums"),
@@ -24,7 +25,9 @@ GENRES: list[tuple[str, str, str]] = [
     ("symphonic", "Симфонический оркестр", "symphony orchestra, full orchestral, strings, brass, woodwinds, timpani"),
     ("opera", "Опера", "opera, operatic soprano and tenor, dramatic aria, full orchestra"),
     ("operetta", "Оперетта", "operetta, light classical, theatrical vocals, waltz rhythm, orchestra"),
-    ("disney", "Сказки Диснея", "disney fairytale musical, broadway style, magical orchestral, storytelling vocals"),
+    ("disney", "Сказки Диснея", "animated fairytale musical, broadway show tune, soaring heartfelt soprano lead, "
+     "lush symphonic orchestra, sweeping strings, harp glissandos, celesta and glockenspiel sparkle, gentle waltz lilt, "
+     "magical and enchanting, big emotional crescendo"),
     ("neoclassical", "Неоклассика", "neoclassical, modern classical, piano and strings, minimalist"),
     ("impressionist", "Импрессионизм", "impressionistic piano, debussy style, lush harmonies, flowing arpeggios"),
     ("cinematic", "Кино-оркестр", "cinematic orchestral, epic, strings and brass"),
@@ -69,13 +72,21 @@ GENRE_ALIASES: dict[str, str] = {
     "latin": "латино", "bossa": "босса-нова", "disco": "диско", "kpop": "кей-поп", "citypop": "японский сити-поп", "gospel": "госпел",
 }
 
-# Жанры, в которых «зашит» язык вокала (код языка ACE); остальные сэмплы жанров поются по-английски
+# Жанры с выверенным описанием: LM его не переписывает (иначе уводит «Советскую эстраду» в блюз, инди и т.п.)
+LITERAL_GENRES: frozenset[str] = frozenset({"sovpop"})
+
+
+def literal_caption(genres: list[str]) -> bool:
+    return any(g in LITERAL_GENRES for g in genres)
+
+
 # Жанры, которые без вокала теряют смысл: их сэмплы поются, сэмплы остальных жанров — инструментальные
 VOCAL_GENRES: frozenset[str] = frozenset({
     "pop", "ruspop", "sovpop", "kpop", "hiphop", "rap", "rnb", "soul", "gospel",
     "chanson", "frchanson", "romance", "ballad", "gregorian", "opera", "operetta", "disney",
 })
 
+# Жанры, в которых «зашит» язык вокала (код языка ACE); остальные сэмплы жанров поются по-английски
 GENRE_LANGUAGE: dict[str, str] = {
     "ruspop": "ru", "sovpop": "ru", "chanson": "ru", "romance": "ru",
     "frchanson": "fr", "latin": "es", "bossa": "pt", "kpop": "ko", "ghibli": "ja", "gregorian": "la", "opera": "it",
