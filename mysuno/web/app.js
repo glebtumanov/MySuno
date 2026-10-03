@@ -321,7 +321,11 @@ function createFormState() {
 function applyRequestToForm(req, { show = true } = {}) {
   $("#f-title").value = req.title || "";
   $("#f-prompt").value = req.prompt || "";
-  S.genres = new Set(req.genres || []); S.moods = new Set(req.moods || []); S.neg = new Set(req.negative_genres || []);
+  // множества меняем на месте: обработчики чипов (chipGroup) держат ссылки именно на эти объекты
+  for (const [set, ids] of [[S.genres, req.genres], [S.moods, req.moods], [S.neg, req.negative_genres]]) {
+    set.clear();
+    (ids || []).forEach((id) => set.add(id));
+  }
   S.vocal = req.vocal || "auto";
   $("#f-lyrics").value = req.lyrics || "";
   $("#f-autolyrics").checked = req.auto_lyrics !== false;
