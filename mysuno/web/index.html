@@ -12,6 +12,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="create">Создать</button>
     <button class="tab" data-view="cover">Каверы</button>
+    <button class="tab" data-view="samples">Библиотека</button>
     <button class="tab" data-view="library">Архив</button>
     <button class="tab" data-view="settings">Настройки</button>
   </nav>
@@ -361,7 +362,33 @@
     </div>
   </section>
 
-  <!-- ===================== БИБЛИОТЕКА ===================== -->
+  <!-- ===================== БИБЛИОТЕКА ЗВУЧАНИЙ ===================== -->
+  <section class="view" id="view-samples">
+    <div class="smp-layout">
+      <div class="card">
+        <div class="smp-head">
+          <h2>Библиотека звучаний</h2>
+          <span class="smp-count" id="smpCount"></span>
+          <select id="smpFilter" title="Что показывать">
+            <option value="all">Все</option>
+            <option value="have">Только готовые</option>
+            <option value="missing">Только без сэмпла</option>
+          </select>
+          <input type="search" id="smpSearch" placeholder="Поиск">
+        </div>
+        <p class="hint smp-intro">Как звучит жанр или настроение: минутный сэмпл, где задан только он, а вокал, текст и темп
+          выбирает LM. Сэмплов пока нет — нажмите «Создать» на нужной карточке: он встанет в очередь и сохранится здесь,
+          в архив не попадает. ⊕ добавляет жанр в форму «Создать».</p>
+        <div id="smpSections"></div>
+      </div>
+      <div class="card queue-card">
+        <h2>Очередь</h2>
+        <div class="job-list"><p class="muted">Пока пусто.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== АРХИВ ===================== -->
   <section class="view" id="view-library">
     <div class="lib">
       <aside class="card folders">

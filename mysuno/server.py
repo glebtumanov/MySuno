@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, config, presets, sources, translate
+from . import __version__, config, presets, samples, sources, translate
 from . import lyrics as lyrics_tools
 from .db import get_library
 from .engine import get_engine, hardware
@@ -300,6 +300,53 @@ def cover(body: CoverRequest):
     job = jobs.submit(request).to_dict()
     job["warnings"] = warnings
     return job
+
+
+# ------------------------------------------------------------------ библиотека звучаний
+class SampleRequest(BaseModel):
+    kind: str = Field(..., pattern="^(genre|mood|neg)$")
+    id: str = Field(..., max_length=40)
+    replace: bool = False   # True — сгенерировать заново, даже если сэмпл уже есть
+
+
+@app.get("/api/samples")
+def list_samples():
+    """Готовые сэмплы {ключ: описание} и сэмплы в работе {ключ: id задачи}; ключ — «вид-id», напр. genre-rock."""
+    return {"samples": samples.list_samples(), "pending": jobs.pending_samples(),
+            "seconds": samples.SAMPLE_SECONDS}
+
+
+@app.post("/api/samples")
+def create_sample(body: SampleRequest):
+    try:
+        request = samples.build_request(body.kind, body.id)
+    except KeyError as exc:
+        raise HTTPException(404, exc.args[0]) from exc
+    k = samples.key(body.kind, body.id)
+    pending = jobs.pending_samples().get(k)
+    if pending:   # уже в очереди — второй раз не ставим
+        return jobs.get(pending).to_dict()
+    if k in samples.list_samples() and not body.replace:
+        raise HTTPException(409, "Сэмпл уже есть в библиотеке")
+    return jobs.submit(request).to_dict()
+
+
+@app.get("/api/samples/{kind}/{preset_id}/audio")
+def sample_audio(kind: str, preset_id: str):
+    try:
+        path = samples.sample_file(kind, preset_id)
+    except KeyError as exc:
+        raise HTTPException(404, exc.args[0]) from exc
+    return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+
+
+@app.delete("/api/samples/{kind}/{preset_id}")
+def delete_sample(kind: str, preset_id: str):
+    try:
+        samples.delete(kind, preset_id)
+    except KeyError as exc:
+        raise HTTPException(404, exc.args[0]) from exc
+    return {"ok": True}
 
 
 @app.get("/api/jobs")

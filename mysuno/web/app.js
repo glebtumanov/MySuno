@@ -78,6 +78,7 @@ function showView(name) {
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   if (name === "library") loadLibrary();
   if (name === "cover") loadSourcePanel();
+  if (name === "samples") loadSamples();
   if (name === "settings") loadSettingsView();
   try { localStorage.setItem("view", name); } catch { /* ok */ }
 }
@@ -460,7 +461,13 @@ function jobsHtml() {
   if (!S.jobs.length) return `<p class="muted">Пока пусто. Заполните форму и нажмите «Сгенерировать».</p>`;
   return S.jobs.map((j) => {
     const pct = Math.round(j.progress * 100);
-    const tracks = (j.track_ids || []).map((id) => {
+    const sk = j.sample && smpKey(j.sample.kind, j.sample.id);
+    const sm = j.status === "done" && sk && LIB.samples[sk];
+    const sampleRow = sm ? `<div class="job-track" data-sample="${esc(sk)}">
+        <button class="btn jt-play" data-qact="splay" title="Воспроизвести сэмпл">▶ ${esc(j.title)} · ${fmtTime(sm.duration)}</button>
+        <button class="btn icon" data-qact="sgo" title="Открыть в библиотеке">↗</button>
+      </div>` : "";
+    const tracks = sampleRow + (j.track_ids || []).map((id) => {
       const t = S.trackCache[id];
       return t ? `<div class="job-track" data-track="${esc(id)}">
         <button class="btn jt-play" data-qact="play" title="Воспроизвести">▶ ${esc(t.title)} · ${fmtTime(t.duration)}</button>
@@ -471,7 +478,7 @@ function jobsHtml() {
     }).join("");
     // готовые задачи убираются дизлайком/удалением треков; кнопка остаётся только у задач без результата
     const stoppable = j.status === "running" && j.kind === "generate";
-    const canCancel = stoppable || j.status === "queued" || j.status === "error" || j.status === "cancelled";
+    const canCancel = stoppable || j.status === "queued" || j.status === "error" || j.status === "cancelled" || !!sm;
     const cancelLabel = stoppable ? "Остановить" : j.status === "queued" ? "Отменить" : "Скрыть";
     return `<div class="job ${esc(j.status)}" data-job="${esc(j.id)}">
       <div class="job-head"><div class="job-title">${esc(j.title)}</div>
@@ -522,6 +529,14 @@ function trackAction(act, t) {
 
 $$(".job-list").forEach((list) => list.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-qact]");
+  const srow = btn && btn.closest("[data-sample]");
+  if (srow) {
+    const k = srow.dataset.sample, sep = k.indexOf("-"), kind = k.slice(0, sep), id = k.slice(sep + 1);
+    const item = smpSection(kind).items().find((i) => i.id === id);
+    if (btn.dataset.qact === "splay" && item && LIB.samples[k]) playTrack(smpTrack(kind, item));
+    if (btn.dataset.qact === "sgo") showView("samples");
+    return;
+  }
   if (btn) {
     const t = S.trackCache[btn.closest("[data-track]").dataset.track];
     if (!t) return;
@@ -550,6 +565,7 @@ async function poll() {
     S.jobs.forEach((j) => (S.prevJobStatus[j.id] = j.status));
     busy = S.jobs.some((j) => j.status === "running" || j.status === "queued");
     if (finishedNow || S.jobs.some((j) => (j.track_ids || []).some((id) => !S.trackCache[id]))) await refreshTrackCache();
+    if (S.jobs.some((j) => j.sample) || Object.keys(LIB.pending).length) syncSamplesFromJobs();
     renderJobs();
     renderEngineBadge();
     if (finishedNow && $("#view-library").classList.contains("active")) loadLibrary();
@@ -592,16 +608,16 @@ function playTrack(track, list) {
   S.queue = list && list.length ? list : [track];
   S.queueIdx = S.queue.findIndex((t) => t.id === track.id);
   S.playingId = track.id;
-  audio.src = `/api/tracks/${track.id}/audio`;
+  audio.src = track.url || `/api/tracks/${track.id}/audio`;
   $("#pTitle").textContent = track.title;
   audio.play().catch(() => {});
   markPlaying();
 }
 function markPlaying() {
-  $$(".track").forEach((r) => {
-    const on = r.dataset.id === S.playingId;
+  $$(".track, .smp.have").forEach((r) => {
+    const on = (r.dataset.pid || r.dataset.id) === S.playingId;
     r.classList.toggle("playing", on);
-    const b = $(".playbtn", r);
+    const b = $(".playbtn, .smp-play", r);
     if (b) b.textContent = on && !audio.paused ? "⏸" : "▶";
   });
 }
@@ -818,6 +834,193 @@ function toggleDetails(row, t) {
     <details class="all-params"><summary>Все параметры генерации</summary><pre>${esc(JSON.stringify(p, null, 2))}</pre></details>`;
   row.appendChild(div);
 }
+
+/* ===================== «Библиотека» звучаний ===================== */
+/* Минутные сэмплы жанров, настроений и негативных жанров. Генерируются по одному по запросу и хранятся отдельно
+   от архива (data/samples). Ключ сэмпла — «вид-id»: genre-rock, mood-sad, neg-metal. */
+const LIB = { samples: {}, pending: {}, seconds: 60, sig: "", loaded: false };
+const SMP_SECTIONS = [
+  { kind: "genre", title: "Жанры", items: () => S.presets.genres, set: () => S.genres },
+  { kind: "mood", title: "Настроение", items: () => S.presets.moods, set: () => S.moods },
+  { kind: "neg", title: "Негативные жанры", items: () => S.presets.genres, set: () => S.neg,
+    hint: "Сэмпл без описания и жанров, где этот жанр передан LM как негативный — сравните с сэмплом самого жанра. "
+      + "⚠ Экспериментально: на turbo-модели в наших A/B-тестах заметного эффекта не было." },
+];
+const smpKey = (kind, id) => `${kind}-${id}`;
+const smpSection = (kind) => SMP_SECTIONS.find((s) => s.kind === kind);
+
+function smpTrack(kind, item) {
+  const k = smpKey(kind, item.id), m = LIB.samples[k];
+  return {
+    id: "smp:" + k, duration: m.duration,
+    url: `/api/samples/${kind}/${encodeURIComponent(item.id)}/audio?f=${encodeURIComponent(m.filename)}`,
+    title: kind === "neg" ? `Сэмпл · без жанра «${item.label}»` : `Сэмпл · ${item.label}`,
+  };
+}
+
+async function loadSamples() {
+  try {
+    const r = await api("/samples");
+    LIB.samples = r.samples; LIB.pending = r.pending; LIB.seconds = r.seconds;
+  } catch { return; }
+  LIB.loaded = true;
+  LIB.sig = Object.keys(LIB.pending).sort().join();
+  renderSamples();
+  renderJobs();   // у готовых сэмплов в очереди появляется кнопка прослушивания
+}
+
+/* Сэмплы в работе известны и из опроса очереди: новый или завершённый сэмпл → перечитываем библиотеку */
+function syncSamplesFromJobs() {
+  const pending = {};
+  for (const j of S.jobs) if (j.sample && (j.status === "queued" || j.status === "running")) pending[smpKey(j.sample.kind, j.sample.id)] = j.id;
+  const sig = Object.keys(pending).sort().join();
+  if (sig !== LIB.sig || !LIB.loaded) { LIB.pending = pending; LIB.sig = sig; LIB.loaded = true; loadSamples(); }
+  else if ($("#view-samples").classList.contains("active")) updateSampleProgress();
+}
+
+/* последняя попытка этого сэмпла упала — покажем ошибку на карточке */
+function smpError(k) {
+  const j = S.jobs.find((x) => x.sample && smpKey(x.sample.kind, x.sample.id) === k);
+  return j && j.status === "error" ? j.error : "";
+}
+
+function smpJobText(j) {
+  if (!j || j.status !== "running") return "в очереди";
+  return `${esc(j.stage)} · ${Math.round(j.progress * 100)}%`;
+}
+
+function smpTile(sec, item) {
+  const k = smpKey(sec.kind, item.id), m = LIB.samples[k], jobId = LIB.pending[k];
+  const inForm = sec.set().has(item.id);
+  const useBtn = `<button class="btn icon smp-use${inForm ? " on" : ""}" data-sact="use" title="${inForm ? "Убрать из формы «Создать»"
+    : sec.kind === "neg" ? "Исключить этот жанр в форме «Создать»" : "Добавить в форму «Создать»"}">${inForm ? "✓" : "⊕"}</button>`;
+  let state, left, sub, actions;
+  if (jobId) {
+    state = "pending";
+    left = `<div class="sp-spin"></div>`;
+    sub = smpJobText(S.jobs.find((x) => x.id === jobId));
+    actions = useBtn;
+  } else if (m) {
+    state = "have";
+    left = `<button class="smp-play" data-sact="play" title="Слушать">▶</button>`;
+    const bpm = posNum(m.bpm), key = realKey(m.keyscale);
+    sub = esc([fmtTime(m.duration), bpm ? `${bpm} BPM` : "", key, m.dit ? ditLabel(m.dit).replace("ACE-Step 1.5 / ", "") : ""]
+      .filter(Boolean).join(" · "));
+    actions = `${useBtn}<button class="btn icon" data-sact="regen" title="Сгенерировать заново (заменит этот сэмпл)">↻</button>`
+      + `<button class="btn icon danger" data-sact="del" title="Удалить сэмпл">🗑</button>`;
+  } else {
+    const err = smpError(k);
+    state = "missing";
+    left = `<div class="smp-dot">♪</div>`;
+    sub = err ? `<span class="smp-err" title="${esc(err)}">ошибка: ${esc(err)}</span>` : "сэмпла ещё нет";
+    actions = `${useBtn}<button class="btn smp-make" data-sact="make" title="Сгенерировать сэмпл на ${fmtTime(LIB.seconds)}">Создать</button>`;
+  }
+  const tip = m ? [m.caption && `Описание: ${m.caption}`, m.negative && m.negative !== "NO USER INPUT" && `Негативные: ${m.negative}`,
+    m.seed != null && `Seed: ${m.seed}`, m.gen_seconds && `Генерация ${m.gen_seconds} с`, m.created_at && `Создан ${fmtDate(m.created_at)}`]
+    .filter(Boolean).join("\n") : "";
+  return `<div class="smp ${state}" data-kind="${sec.kind}" data-id="${esc(item.id)}" data-pid="smp:${esc(k)}"${tip ? ` title="${esc(tip)}"` : ""}>
+    ${left}
+    <div class="smp-meta"><div class="smp-name">${sec.kind === "neg" ? "без: " : ""}${esc(item.label)}</div><div class="smp-sub">${sub}</div></div>
+    <div class="smp-actions">${actions}</div>
+  </div>`;
+}
+
+function renderSamples() {
+  if (!S.presets) return;
+  const q = $("#smpSearch").value.trim().toLowerCase(), filter = $("#smpFilter").value;
+  let have = 0, total = 0;
+  const html = SMP_SECTIONS.map((sec) => {
+    const all = sec.items();
+    const ready = all.filter((i) => LIB.samples[smpKey(sec.kind, i.id)]).length;
+    have += ready; total += all.length;
+    const shown = all.filter((i) => {
+      const k = smpKey(sec.kind, i.id);
+      if (q && !i.label.toLowerCase().includes(q)) return false;
+      if (filter === "have") return !!LIB.samples[k];
+      if (filter === "missing") return !LIB.samples[k];
+      return true;
+    });
+    if (!shown.length) return "";
+    return `<section class="smp-sec ${sec.kind}">
+      <h3>${esc(sec.title)} <span class="smp-sec-count">${ready} из ${all.length}</span></h3>
+      ${sec.hint ? `<p class="hint">${esc(sec.hint)}</p>` : ""}
+      <div class="smp-grid">${shown.map((i) => smpTile(sec, i)).join("")}</div>
+    </section>`;
+  }).join("");
+  $("#smpSections").innerHTML = html || `<div class="empty">Ничего не найдено.</div>`;
+  $("#smpCount").textContent = `готово ${have} из ${total}`;
+  markPlaying();
+}
+
+function updateSampleProgress() {
+  for (const [k, jobId] of Object.entries(LIB.pending)) {
+    const el = $(`.smp[data-pid="smp:${CSS.escape(k)}"] .smp-sub`);
+    if (el) el.innerHTML = smpJobText(S.jobs.find((x) => x.id === jobId));
+  }
+}
+
+async function makeSample(kind, id, replace = false) {
+  try {
+    const job = await api("/samples", { method: "POST", body: { kind, id, replace } });
+    LIB.pending[smpKey(kind, id)] = job.id;
+  } catch (err) { alert(err.message); return; }
+  renderSamples();
+  pollNow();
+}
+
+/* ⊕ — добавить пресет в форму «Создать» (или убрать); жанр не бывает одновременно желаемым и исключённым */
+function toggleInForm(kind, id) {
+  const set = smpSection(kind).set();
+  if (set.has(id)) set.delete(id);
+  else {
+    set.add(id);
+    if (kind === "genre") S.neg.delete(id);
+    if (kind === "neg") S.genres.delete(id);
+  }
+  syncChips();
+  scheduleUiSave();
+  renderSamples();
+}
+
+$("#smpSections").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-sact]"), tile = e.target.closest(".smp");
+  if (!btn || !tile) return;
+  const { kind, id } = tile.dataset, sec = smpSection(kind);
+  const item = sec.items().find((i) => i.id === id);
+  const label = (kind === "neg" ? "без жанра " : "") + `«${item.label}»`;
+  switch (btn.dataset.sact) {
+    case "play": {
+      const t = smpTrack(kind, item);
+      if (S.playingId === t.id && audio.src) { audio.paused ? audio.play() : audio.pause(); break; }
+      // ⏮/⏭ листают готовые сэмплы этого раздела
+      playTrack(t, sec.items().filter((i) => LIB.samples[smpKey(kind, i.id)]).map((i) => smpTrack(kind, i)));
+      break;
+    }
+    case "make": makeSample(kind, id); break;
+    case "regen": {
+      const ok = await dialog({ title: "Сгенерировать заново?", text: `Новый сэмпл ${label} заменит текущий.`, ok: "Сгенерировать" });
+      if (ok) makeSample(kind, id, true);
+      break;
+    }
+    case "del": {
+      const ok = await dialog({ title: "Удалить сэмпл?", text: `Сэмпл ${label} будет удалён; его можно будет создать снова.`, ok: "Удалить", danger: true });
+      if (!ok) break;
+      if (S.playingId === "smp:" + smpKey(kind, id)) { audio.pause(); audio.removeAttribute("src"); S.playingId = null; $("#pTitle").textContent = "Ничего не играет"; }
+      try { await api(`/samples/${kind}/${encodeURIComponent(id)}`, { method: "DELETE" }); } catch (err) { alert(err.message); }
+      loadSamples();
+      break;
+    }
+    case "use": toggleInForm(kind, id); break;
+  }
+});
+let smpSearchTimer = null;
+$("#smpSearch").addEventListener("input", () => { clearTimeout(smpSearchTimer); smpSearchTimer = setTimeout(renderSamples, 150); });
+try { $("#smpFilter").value = localStorage.getItem("smpFilter") || "all"; } catch { /* ok */ }
+if (!$("#smpFilter").value) $("#smpFilter").value = "all";
+$("#smpFilter").addEventListener("change", () => {
+  try { localStorage.setItem("smpFilter", $("#smpFilter").value); } catch { /* ok */ }
+  renderSamples();
+});
 
 /* ===================== «Каверы» ===================== */
 /* source: { kind: "upload" | "track", id, name, duration, url, lyrics } */

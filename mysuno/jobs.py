@@ -13,7 +13,7 @@ from typing import Any
 
 from loguru import logger
 
-from . import config, presets, sources
+from . import config, presets, samples, sources
 from .db import Library
 from .engine import AceEngine, Cancelled
 
@@ -48,6 +48,7 @@ class Job:
             "elapsed": round(end - self.started_at, 1) if self.started_at else 0,
             "created_at": self.created_at,
             "title": _job_title(self),
+            "sample": self.request.get("sample"),   # сэмпл библиотеки: {kind, id}; в архив не попадает
         }
 
 
@@ -88,6 +89,12 @@ class JobManager:
 
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
+
+    def pending_samples(self) -> dict[str, str]:
+        """{ключ сэмпла: id задачи} для сэмплов, которые ждут в очереди или генерируются."""
+        with self._lock:
+            return {samples.key(s["kind"], s["id"]): j.id for j in self._jobs.values()
+                    if (s := j.request.get("sample")) and j.status in ("queued", "running")}
 
     def cancel(self, job_id: str) -> str | None:
         """Отменяет задачу в очереди, останавливает выполняющуюся или убирает завершённую из списка.
@@ -183,6 +190,10 @@ class JobManager:
     def _generate_and_store(self, job: Job, req: dict[str, Any], settings: dict[str, Any], progress,
                             tmp: Path) -> None:
         result = self.engine.generate(req, settings, progress, tmp)
+        if req.get("sample"):
+            progress(0.99, "Сохранение в библиотеку…")
+            self._store_sample(req, result)
+            return
         progress(0.99, "Сохранение в архив…")
 
         base_title = (req.get("title") or "").strip() or _auto_title(req)
@@ -215,6 +226,23 @@ class JobManager:
                         "batch_index": i, "batch_size": n, "ranked": result.get("ranked", False)},
             )
             job.track_ids.append(track["id"])
+
+    @staticmethod
+    def _store_sample(req: dict[str, Any], result: dict[str, Any]) -> None:
+        t = result["tracks"][0]
+        ace = t.get("ace") or {}
+        lm = (result.get("generation") or {}).get("lm_metadata") or {}
+        samples.store(req["sample"]["kind"], req["sample"]["id"], Path(t["path"]), {
+            "duration": t["duration"],
+            "seed": t.get("seed"),
+            "gen_seconds": result["gen_seconds"],
+            "caption": result["caption"],
+            "negative": result["negative"],
+            "lyrics": result["lyrics"],
+            "dit": (result.get("plan") or {}).get("dit"),
+            "bpm": ace.get("bpm") or ace.get("cot_bpm") or lm.get("bpm"),
+            "keyscale": ace.get("keyscale") or ace.get("cot_keyscale") or lm.get("keyscale"),
+        })
 
 
 def _cover_info(req: dict[str, Any], result: dict[str, Any], track: dict[str, Any]) -> dict[str, Any] | None:

@@ -360,3 +360,49 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 
 .track-details .all-params summary { cursor: pointer; color: var(--muted); margin-top: 6px; }
 .track-details .all-params pre { font: 12px/1.45 ui-monospace, Consolas, monospace; max-height: 360px; }
+
+/* ---------- библиотека звучаний ---------- */
+.smp-layout { display: grid; gap: 20px; align-items: start; grid-template-columns: minmax(0, 2.6fr) minmax(300px, 1fr); }
+.smp-layout > * { min-width: 0; }
+.smp-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.smp-head h2 { margin: 0; }
+.smp-count { flex: 1; color: var(--muted); font-size: 13.5px; white-space: nowrap; }
+.smp-head select { width: auto; }
+.smp-head input { max-width: 240px; }
+.smp-intro { margin: 10px 0 4px; }
+.smp-sec h3 { margin: 22px 0 6px; display: flex; align-items: baseline; gap: 10px; }
+.smp-sec-count { font-size: 12.5px; font-weight: 400; color: var(--muted); }
+.smp-sec > .hint { margin: 0 0 10px; }
+.smp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 8px; }
+.smp {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  padding: 8px 8px 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2);
+}
+.smp.missing { background: transparent; border-style: dashed; }
+.smp.missing .smp-name { color: var(--muted); }
+.smp.pending { border-color: var(--accent-2); }
+.smp.playing { border-color: var(--accent); background: rgba(124,92,255,.12); }
+.smp .sp-spin { margin: 7px; }
+.smp-play {
+  width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--accent); color: #fff;
+  font-size: 13px; cursor: pointer; padding: 0;
+}
+.smp-dot {
+  width: 34px; height: 34px; border-radius: 50%; border: 1px dashed var(--line); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.smp-meta { min-width: 0; }
+.smp-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smp-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smp-err { color: var(--bad); }
+.smp-actions { display: flex; gap: 4px; align-items: center; }
+.smp-actions .btn.icon { padding: 4px 7px; min-width: 30px; font-size: 13px; }
+.smp-actions .btn.icon:not(.smp-use.on) { opacity: .55; }
+.smp:hover .smp-actions .btn.icon { opacity: 1; }
+.smp-use.on { color: var(--accent-2); border-color: var(--accent); }
+.smp-sec.neg .smp-use.on { color: var(--bad); border-color: var(--bad); }
+.smp-make { padding: 5px 10px; font-size: 13px; }
+@media (max-width: 1400px) {
+  .smp-layout { grid-template-columns: minmax(0, 1fr); }
+  .smp-layout .queue-card { position: static; max-height: none; }
+}
