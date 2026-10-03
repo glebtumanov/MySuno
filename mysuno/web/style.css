@@ -124,7 +124,6 @@ details:not([open]) > summary::before { transform: none; }
 }
 .chip:hover { border-color: var(--accent-2); }
 .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.neg-chips .chip.on { background: var(--bad); border-color: var(--bad); }
 .chip:disabled { opacity: .3; cursor: not-allowed; border-color: var(--line); text-decoration: line-through; }
 .segmented { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .segmented button {
@@ -346,7 +345,6 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 .fold.collapsed .sp-chev { transform: none; }
 .fold-head em { flex: 0 0 auto; }
 .fold.collapsed .fold-head em { display: none; }
-.neg .fold-sum:not(.none) { color: var(--bad); }
 .fold-sum { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--accent-2); }
 .fold.collapsed .fold-sum { display: block; }
 .fold-sum.none { color: var(--muted); }
@@ -410,3 +408,28 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   .smp-layout { grid-template-columns: minmax(0, 1fr); }
   .smp-layout .queue-card { position: static; max-height: none; }
 }
+
+/* ---------- жанры в поле описания ---------- */
+.genre-line { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; min-height: 26px; }
+.genre-line .hint { margin: 0; }
+.gchip {
+  display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; border-radius: 99px; font-size: 13px;
+  background: rgba(124,92,255,.16); border: 1px solid var(--accent); color: var(--text);
+}
+.gchip.neg { background: rgba(255,107,107,.12); border-color: var(--bad); }
+.gchip button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 11px; padding: 2px 5px; border-radius: 99px; }
+.gchip button:hover { color: var(--text); background: rgba(255,255,255,.08); }
+.gac {
+  position: fixed; z-index: 50; min-width: 220px; max-width: 320px; max-height: 280px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.45);
+}
+.gac-head { font-size: 11.5px; color: var(--muted); padding: 4px 8px 6px; }
+.gac-item { display: flex; align-items: baseline; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 14px; }
+.gac-item em { margin-left: auto; font-size: 12px; }
+.gac-item.on { background: var(--accent); color: #fff; }
+.gac-item.on em { color: #e0d8ff; }
+.gac-sign { font-weight: 700; width: 10px; text-align: center; }
+.gac-sign.plus { color: var(--accent-2); }
+.gac-sign.minus { color: var(--bad); }
+.gac-item.on .gac-sign { color: #fff; }

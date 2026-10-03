@@ -56,17 +56,13 @@
           <input type="text" id="f-title" maxlength="120" placeholder="Осенний дождь">
         </label>
 
-        <label class="field">
-          <span>Описание музыки</span>
+        <div class="field">
+          <span>Описание музыки и жанры</span>
           <textarea id="f-prompt" rows="3" maxlength="2000"
-            placeholder="Например: грустная лирическая песня про осенний дождь, фортепиано и струнные"></textarea>
-        </label>
-
-        <div class="field fold" data-fold="genres">
-          <button type="button" class="fold-head" aria-expanded="true">
-            <span class="sp-chev"></span><b>Жанры</b><span class="fold-sum" id="genreSum"></span>
-          </button>
-          <div class="fold-body"><div class="chips" id="genreChips"></div></div>
+            placeholder="Например: +Jazz грустная лирическая песня про осенний дождь, фортепиано и струнные&#10;+ — добавить жанр, - — исключить жанр"></textarea>
+          <div class="genre-line" id="f-genreLine"></div>
+          <p class="hint" id="f-negHint" hidden>⚠ Исключение жанров экспериментально: жанр передаётся LM как «негативный промпт»,
+            но на turbo-модели в наших A/B-тестах заметного эффекта не было.</p>
         </div>
 
         <div class="field fold" data-fold="moods">
@@ -77,17 +73,6 @@
         </div>
 
         <div class="tag-warn" id="tagWarn" hidden></div>
-
-        <div class="field fold neg" data-fold="neg" data-default="collapsed">
-          <button type="button" class="fold-head" aria-expanded="true">
-            <span class="sp-chev"></span><b>Негативные жанры</b><em>(чего не должно быть)</em><span class="fold-sum" id="negSum"></span>
-          </button>
-          <div class="fold-body">
-            <div class="chips neg-chips" id="negChips"></div>
-            <p class="hint">⚠ Экспериментально. Выбранный жанр убирается из позитивных тегов и передаётся LM как «негативный промпт»,
-              но на turbo-модели в наших A/B-тестах заметного эффекта не было. Надёжного запрета жанра пока нет.</p>
-          </div>
-        </div>
 
         <div class="field">
           <span>Вокал</span>
@@ -253,17 +238,11 @@
           <input type="text" id="c-title" maxlength="120" placeholder="Кавер: …">
         </label>
 
-        <label class="field">
-          <span>Новый стиль</span>
+        <div class="field">
+          <span>Новый стиль и жанры</span>
           <textarea id="c-prompt" rows="2" maxlength="2000"
-            placeholder="Например: джаз, саксофон, контрабас, щётки по барабанам"></textarea>
-        </label>
-
-        <div class="field fold" data-fold="c-genres">
-          <button type="button" class="fold-head" aria-expanded="true">
-            <span class="sp-chev"></span><b>Жанры</b><span class="fold-sum" id="c-genreSum"></span>
-          </button>
-          <div class="fold-body"><div class="chips" id="c-genreChips"></div></div>
+            placeholder="Например: +Jazz саксофон, контрабас, щётки по барабанам&#10;+ — добавить жанр"></textarea>
+          <div class="genre-line" id="c-genreLine"></div>
         </div>
 
         <div class="field fold" data-fold="c-moods">

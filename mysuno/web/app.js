@@ -113,6 +113,212 @@ function renderTagWarnings(genres = S.genres, moods = S.moods, box = $("#tagWarn
   box.innerHTML = out.map((t) => `<div>⚠ ${esc(t)}</div>`).join("");
 }
 
+/* ===================== жанры в тексте описания: «+жанр» и «-жанр» ===================== */
+/* Жанр выбирается прямо в поле описания: «+» открывает список жанров (сужается по мере набора), «-» — список
+   жанров, которые надо исключить. В тексте жанр остаётся токеном «+Rock» / «-Metal»; при отправке токены
+   вырезаются из описания и уходят списками genres / negative_genres. */
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+let genreTokenRe = null, genreByLabel = null;
+
+function genreTokens() {
+  if (!genreTokenRe) {
+    const labels = S.presets.genres.map((g) => g.label).sort((a, b) => b.length - a.length).map(reEsc);
+    genreTokenRe = new RegExp(`(^|[\\s,;(])([+-])(${labels.join("|")})(?=$|[\\s,.;:!?)])`, "giu");
+    genreByLabel = Object.fromEntries(S.presets.genres.map((g) => [g.label.toLowerCase(), g]));
+  }
+  return genreTokenRe;
+}
+
+/* текст поля → { genres, neg, prompt }: prompt — описание без токенов (его переводят и отдают модели) */
+function parseGenres(text, allowNeg = true) {
+  const genres = [], neg = [];
+  const cut = (text || "").replace(genreTokens(), (all, pre, sign, label) => {
+    const g = genreByLabel[label.toLowerCase()];
+    if (sign === "-" && !allowNeg) return all;   // в каверах исключать жанры нельзя — минус остаётся текстом
+    const [add, del] = sign === "+" ? [genres, neg] : [neg, genres];
+    if (del.includes(g.id)) del.splice(del.indexOf(g.id), 1);
+    if (!add.includes(g.id)) add.push(g.id);
+    return pre;
+  });
+  // убираем «дыры» на месте токенов: двойные пробелы, пробел перед знаком, «, .» и висящие запятые по краям
+  const prompt = cut.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/ +([,.;:!?])/g, "$1")
+    .replace(/[,;]+(?=[,.;:!?])/g, "").replace(/^[\s,;.]+|[\s,;]+$/g, "");
+  return { genres, neg, prompt };
+}
+
+/* запрос → текст поля: токены жанров перед описанием */
+function genresToText(req, allowNeg = true) {
+  if (typeof req.prompt_text === "string") return req.prompt_text;   // сохранённое состояние формы — как было набрано
+  const label = Object.fromEntries(S.presets.genres.map((g) => [g.id, g.label]));
+  const tokens = [...(req.genres || []).filter((g) => label[g]).map((g) => "+" + label[g]),
+    ...(allowNeg ? (req.negative_genres || []) : []).filter((g) => label[g]).map((g) => "-" + label[g])];
+  return [tokens.join(" "), req.prompt || ""].filter(Boolean).join(" ");
+}
+
+/* убрать токены жанра (с любым знаком) из текста */
+function removeGenreToken(text, id) {
+  return text.replace(genreTokens(), (all, pre, sign, label) => (genreByLabel[label.toLowerCase()].id === id ? pre : all))
+    .replace(/[ \t]{2,}/g, " ").replace(/^ +/, "");
+}
+
+/* добавить токен жанра в начало текста (токен с другим знаком убирается) */
+function addGenreToken(text, sign, id) {
+  const g = S.presets.genres.find((x) => x.id === id);
+  return `${sign}${g.label} ${removeGenreToken(text, id).replace(/^\s+/, "")}`;
+}
+
+/* Координаты каретки в textarea (зеркальный div с теми же стилями) — список жанров открывается под ней */
+function caretXY(ta, pos) {
+  const cs = getComputedStyle(ta), m = document.createElement("div");
+  for (const p of ["boxSizing", "width", "fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "wordSpacing",
+    "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "borderTopWidth", "borderRightWidth", "borderBottomWidth",
+    "borderLeftWidth", "tabSize"]) m.style[p] = cs[p];
+  Object.assign(m.style, { position: "absolute", visibility: "hidden", whiteSpace: "pre-wrap", overflowWrap: "break-word", top: "0", left: "-9999px" });
+  m.textContent = ta.value.slice(0, pos);
+  const span = document.createElement("span");
+  span.textContent = "​";
+  m.appendChild(span);
+  document.body.appendChild(m);
+  const r = ta.getBoundingClientRect();
+  const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.45;
+  const xy = { x: r.left + span.offsetLeft - ta.scrollLeft, y: r.top + span.offsetTop - ta.scrollTop, lh };
+  m.remove();
+  return xy;
+}
+
+/* Автодополнение жанров в поле описания; onChange(parsed) — после каждого изменения текста */
+function genreAutocomplete(ta, { allowNeg, onChange }) {
+  const box = document.createElement("div");
+  box.className = "gac";
+  box.hidden = true;
+  box.setAttribute("role", "listbox");
+  document.body.appendChild(box);
+  let ctx = null;   // { start, sign, items, idx }
+
+  // ближайший к каретке «+» / «-», стоящий в начале строки или после пробела; между ним и кареткой — запрос
+  function findContext() {
+    const pos = ta.selectionStart;
+    if (pos !== ta.selectionEnd) return null;
+    const before = ta.value.slice(0, pos);
+    for (let i = pos - 1; i >= 0 && i >= pos - 32; i--) {
+      const ch = before[i];
+      if (ch === "\n") return null;
+      if ((ch === "+" || (ch === "-" && allowNeg)) && (i === 0 || /[\s,;(]/.test(before[i - 1]))) {
+        const q = before.slice(i + 1);
+        if (/^\s/.test(q)) return null;   // «текст - текст» — обычное тире, не жанр
+        return { start: i, sign: ch, q: q.toLowerCase() };
+      }
+    }
+    return null;
+  }
+
+  function matches(q, sign) {
+    const chosen = parseGenres(ta.value, allowNeg);
+    const taken = new Set(sign === "+" ? chosen.genres : chosen.neg);
+    const scored = [];
+    for (const g of byAlphabet(S.presets.genres)) {
+      if (taken.has(g.id)) continue;
+      const label = g.label.toLowerCase(), alias = (g.alias || "").toLowerCase();
+      let score = -1;
+      if (!q || label.startsWith(q)) score = 0;
+      else if (label.split(/[\s-]+/).some((w) => w.startsWith(q)) || alias.split(/\s+/).some((w) => w.startsWith(q)) || g.id.startsWith(q)) score = 1;
+      else if (label.includes(q) || alias.includes(q)) score = 2;
+      if (score >= 0) scored.push([score, g]);
+    }
+    return scored.sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+  }
+
+  function render() {
+    box.innerHTML = `<div class="gac-head">${ctx.sign === "+" ? "Добавить жанр" : "Исключить жанр"}</div>` +
+      ctx.items.map((g, i) => `<div class="gac-item${i === ctx.idx ? " on" : ""}" role="option" data-i="${i}">` +
+        `<span class="gac-sign ${ctx.sign === "+" ? "plus" : "minus"}">${ctx.sign === "+" ? "+" : "−"}</span>${esc(g.label)}` +
+        `${g.alias ? `<em>${esc(g.alias)}</em>` : ""}</div>`).join("");
+    const xy = caretXY(ta, ctx.start);
+    box.hidden = false;
+    const w = box.offsetWidth, h = box.offsetHeight;
+    const left = Math.max(8, Math.min(xy.x - 4, innerWidth - w - 8));
+    let top = xy.y + xy.lh + 4;
+    if (top + h > innerHeight - 90) top = Math.max(8, xy.y - h - 4);   // снизу плеер — тогда открываем вверх
+    box.style.left = left + "px";
+    box.style.top = top + "px";
+    const on = $(".gac-item.on", box);
+    if (on) on.scrollIntoView({ block: "nearest" });
+  }
+
+  function update() {
+    const c = findContext();
+    const items = c ? matches(c.q, c.sign) : [];
+    if (!c || !items.length) { close(); return; }
+    const keep = ctx && ctx.start === c.start ? ctx.items[ctx.idx] : null;
+    ctx = { ...c, items, idx: Math.max(0, keep ? items.indexOf(keep) : 0) };
+    render();
+  }
+
+  function close() { ctx = null; box.hidden = true; }
+
+  function choose(g) {
+    const pos = ta.selectionStart, v = ta.value;
+    let rest = v.slice(pos);
+    // жанр не бывает одновременно желаемым и исключённым: токен с другим знаком убираем
+    let head = v.slice(0, ctx.start);
+    const other = ctx.sign === "+" ? parseGenres(v, allowNeg).neg : parseGenres(v, allowNeg).genres;
+    if (other.includes(g.id)) { head = removeGenreToken(head, g.id); rest = removeGenreToken(rest, g.id); }
+    const token = ctx.sign + g.label + (/^\s/.test(rest) ? "" : " ");
+    ta.value = head + token + rest;
+    const caret = head.length + token.length + (/^\s/.test(rest) ? 1 : 0);
+    ta.setSelectionRange(caret, caret);
+    close();
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.focus();
+  }
+
+  ta.addEventListener("input", () => { onChange(parseGenres(ta.value, allowNeg)); update(); });
+  ta.addEventListener("click", update);
+  ta.addEventListener("keyup", (e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) update(); });
+  ta.addEventListener("keydown", (e) => {
+    if (!ctx) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      ctx.idx = (ctx.idx + (e.key === "ArrowDown" ? 1 : -1) + ctx.items.length) % ctx.items.length;
+      render();
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      choose(ctx.items[ctx.idx]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    }
+  });
+  ta.addEventListener("blur", () => setTimeout(close, 150));
+  ta.addEventListener("scroll", () => { if (ctx) render(); });
+  window.addEventListener("resize", () => { if (ctx) render(); });
+  document.addEventListener("scroll", () => { if (ctx) render(); }, true);
+  box.addEventListener("mousedown", (e) => {
+    e.preventDefault();   // фокус остаётся в поле
+    const it = e.target.closest(".gac-item");
+    if (it && ctx) choose(ctx.items[Number(it.dataset.i)]);
+  });
+  box.addEventListener("mousemove", (e) => {
+    const it = e.target.closest(".gac-item");
+    if (it && ctx && Number(it.dataset.i) !== ctx.idx) { ctx.idx = Number(it.dataset.i); $$(".gac-item", box).forEach((x, i) => x.classList.toggle("on", i === ctx.idx)); }
+  });
+}
+
+/* Строка под полем: выбранные жанры (и исключённые) с крестиком — убрать токен из текста */
+function renderGenreLine(box, ta, parsed, allowNeg) {
+  const label = Object.fromEntries(S.presets.genres.map((g) => [g.id, g.label]));
+  const chip = (id, cls) => `<span class="gchip ${cls}">${cls === "neg" ? "−" : "+"}${esc(label[id])}` +
+    `<button type="button" data-gdel="${esc(id)}" title="Убрать">✕</button></span>`;
+  const parts = parsed.genres.map((id) => chip(id, "pos")).concat(allowNeg ? parsed.neg.map((id) => chip(id, "neg")) : []);
+  box.innerHTML = parts.length ? parts.join("") : `<span class="hint">Наберите <b>+</b>, чтобы добавить жанр${allowNeg ? ", <b>-</b> — чтобы исключить" : ""}</span>`;
+  box.onclick = (e) => {
+    const b = e.target.closest("[data-gdel]");
+    if (!b) return;
+    ta.value = removeGenreToken(ta.value, b.dataset.gdel);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+}
+
 /* ===================== сворачиваемые поля ===================== */
 /* .fold[data-fold] — заголовок сворачивает тело; состояние запоминается; в свёрнутом виде .fold-sum показывает выбор */
 function initFolds() {
@@ -140,19 +346,21 @@ function setChipSummary(el, items, set) {
   el.title = el.textContent;
 }
 
+const setTo = (set, ids) => { set.clear(); ids.forEach((id) => set.add(id)); };
+
+/* жанры «Создать» берутся из токенов в поле описания */
+function syncCreateGenres() {
+  const p = parseGenres($("#f-prompt").value, true);
+  setTo(S.genres, p.genres);
+  setTo(S.neg, p.neg);
+}
+
 function syncChips() {
-  setChipSummary($("#genreSum"), S.presets.genres, S.genres);
   setChipSummary($("#moodSum"), S.presets.moods, S.moods);
-  setChipSummary($("#negSum"), S.presets.genres, S.neg);
   renderTagWarnings();
-  $$("#genreChips .chip").forEach((c) => c.classList.toggle("on", S.genres.has(c.dataset.id)));
+  renderGenreLine($("#f-genreLine"), $("#f-prompt"), { genres: [...S.genres], neg: [...S.neg] }, true);
+  $("#f-negHint").hidden = !S.neg.size;
   $$("#moodChips .chip").forEach((c) => c.classList.toggle("on", S.moods.has(c.dataset.id)));
-  $$("#negChips .chip").forEach((c) => {
-    const pos = S.genres.has(c.dataset.id);   // жанр уже выбран как желаемый — исключить его нельзя
-    c.disabled = pos;
-    c.title = pos ? "Выбран в «Жанрах» — снимите его там, чтобы исключить" : "";
-    c.classList.toggle("on", S.neg.has(c.dataset.id));
-  });
   $$("#vocalSeg button").forEach((b) => b.classList.toggle("on", b.dataset.id === S.vocal));
   $("#f-lyrics").disabled = S.vocal === "none";
   $("#f-autolyrics").disabled = S.vocal === "none";
@@ -189,9 +397,8 @@ function initCreate() {
       saveAdv();
     });
   }
-  chipGroup($("#genreChips"), p.genres, S.genres, { onToggle: (id) => { if (S.genres.has(id)) S.neg.delete(id); } });
+  genreAutocomplete($("#f-prompt"), { allowNeg: true, onChange: () => { syncCreateGenres(); syncChips(); } });
   chipGroup($("#moodChips"), p.moods, S.moods);
-  chipGroup($("#negChips"), p.genres, S.neg, { onToggle: (id) => { if (S.neg.has(id)) S.genres.delete(id); } });
   $("#vocalSeg").innerHTML = p.vocals.map((v) => `<button type="button" data-id="${esc(v.id)}">${esc(v.label)}</button>`).join("");
   $("#vocalSeg").addEventListener("click", (e) => {
     const b = e.target.closest("button");
@@ -299,8 +506,9 @@ async function onGenerate(e) {
 function createFormState() {
   return {
     title: $("#f-title").value.trim(),
-    prompt: $("#f-prompt").value.trim(),
-    genres: [...S.genres], moods: [...S.moods], negative_genres: [...S.neg],
+    ...(({ prompt, genres, neg }) => ({ prompt, genres, negative_genres: neg }))(parseGenres($("#f-prompt").value, true)),
+    prompt_text: $("#f-prompt").value,   // как набрано, с токенами жанров — для восстановления формы
+    moods: [...S.moods],
     vocal: S.vocal,
     lyrics: S.vocal === "none" ? "" : $("#f-lyrics").value.trim(),
     auto_lyrics: $("#f-autolyrics").checked,
@@ -321,12 +529,10 @@ function createFormState() {
 
 function applyRequestToForm(req, { show = true } = {}) {
   $("#f-title").value = req.title || "";
-  $("#f-prompt").value = req.prompt || "";
+  $("#f-prompt").value = genresToText(req, true);
+  syncCreateGenres();
   // множества меняем на месте: обработчики чипов (chipGroup) держат ссылки именно на эти объекты
-  for (const [set, ids] of [[S.genres, req.genres], [S.moods, req.moods], [S.neg, req.negative_genres]]) {
-    set.clear();
-    (ids || []).forEach((id) => set.add(id));
-  }
+  setTo(S.moods, req.moods || []);
   S.vocal = req.vocal || "auto";
   $("#f-lyrics").value = req.lyrics || "";
   $("#f-autolyrics").checked = req.auto_lyrics !== false;
@@ -1008,13 +1214,15 @@ async function makeSample(kind, id, replace = false) {
   pollNow();
 }
 
-/* ⊕ — добавить пресет в форму «Создать» (или убрать) */
+/* ⊕ — добавить пресет в форму «Создать» (или убрать); жанр — токеном «+жанр» в поле описания */
 function toggleInForm(kind, id) {
-  const set = smpSection(kind).set();
-  if (set.has(id)) set.delete(id);
-  else {
-    set.add(id);
-    if (kind === "genre") S.neg.delete(id);   // жанр не бывает одновременно желаемым и исключённым
+  if (kind === "genre") {
+    const ta = $("#f-prompt");
+    ta.value = S.genres.has(id) ? removeGenreToken(ta.value, id) : addGenreToken(ta.value, "+", id);
+    syncCreateGenres();
+  } else {
+    const set = smpSection(kind).set();
+    set.has(id) ? set.delete(id) : set.add(id);
   }
   syncChips();
   scheduleUiSave();
@@ -1095,10 +1303,9 @@ coverPrev.preload = "none";
 let audioCtx = null;
 
 function syncCoverChips() {
-  setChipSummary($("#c-genreSum"), S.presets.genres, C.genres);
   setChipSummary($("#c-moodSum"), S.presets.moods, C.moods);
   renderTagWarnings(C.genres, C.moods, $("#c-tagWarn"));
-  $$("#c-genreChips .chip").forEach((c) => c.classList.toggle("on", C.genres.has(c.dataset.id)));
+  renderGenreLine($("#c-genreLine"), $("#c-prompt"), { genres: [...C.genres], neg: [] }, false);
   $$("#c-moodChips .chip").forEach((c) => c.classList.toggle("on", C.moods.has(c.dataset.id)));
   $$("#c-vocalSeg button").forEach((b) => b.classList.toggle("on", b.dataset.id === C.vocal));
   $("#c-lyrics").disabled = C.vocal === "none";
@@ -1154,7 +1361,7 @@ function saveCoverPrefs() {
 
 function initCover() {
   const p = S.presets;
-  chipGroup($("#c-genreChips"), p.genres, C.genres, { sync: syncCoverChips });
+  genreAutocomplete($("#c-prompt"), { allowNeg: false, onChange: (pg) => { setTo(C.genres, pg.genres); syncCoverChips(); } });
   chipGroup($("#c-moodChips"), p.moods, C.moods, { sync: syncCoverChips });
   $("#c-vocalSeg").innerHTML = p.vocals.map((v) => `<button type="button" data-id="${esc(v.id)}">${esc(v.label)}</button>`).join("");
   $("#c-vocalSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { C.vocal = b.dataset.id; syncCoverChips(); } });
@@ -1709,8 +1916,9 @@ function coverFormState() {
     start: s ? Math.round(C.start * 100) / 100 : 0,
     end: !s || C.end >= s.duration - 0.05 ? null : Math.round(C.end * 100) / 100,
     title: $("#c-title").value.trim(),
-    prompt: $("#c-prompt").value.trim(),
-    genres: [...C.genres], moods: [...C.moods], vocal: C.vocal,
+    ...(({ prompt, genres }) => ({ prompt, genres }))(parseGenres($("#c-prompt").value, false)),
+    prompt_text: $("#c-prompt").value,
+    moods: [...C.moods], vocal: C.vocal,
     lyrics: C.vocal === "none" ? "" : $("#c-lyrics").value.trim(),
     cover_mode: C.mode,
     cover_strength: Number($("#c-strength").value),
@@ -1726,8 +1934,8 @@ function coverFormState() {
 async function applyRequestToCover(req, { show = true, quiet = false } = {}) {
   if (show) showView("cover");
   $("#c-title").value = req.title || "";
-  $("#c-prompt").value = req.prompt || "";
-  C.genres.clear(); (req.genres || []).forEach((g) => C.genres.add(g));
+  $("#c-prompt").value = genresToText(req, false);
+  setTo(C.genres, parseGenres($("#c-prompt").value, false).genres);
   C.moods.clear(); (req.moods || []).forEach((m) => C.moods.add(m));
   C.vocal = req.vocal || "auto";
   $("#c-lyrics").value = req.lyrics || "";
