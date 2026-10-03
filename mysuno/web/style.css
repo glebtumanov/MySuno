@@ -173,7 +173,7 @@ details:not([open]) > summary::before { transform: none; }
 .btn.rate.like.on { filter: none; opacity: 1; border-color: var(--good); background: rgba(62,207,142,.15); }
 .btn.rate.dislike.on { filter: none; opacity: 1; border-color: var(--bad); background: rgba(255,107,107,.15); }
 
-/* ---------- библиотека ---------- */
+/* ---------- архив ---------- */
 .lib { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
 .folders h3 { margin-top: 0; }
 .folders ul { list-style: none; margin: 0 0 12px; padding: 0; }

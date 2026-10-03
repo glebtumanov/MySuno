@@ -12,7 +12,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="create">Создать</button>
     <button class="tab" data-view="cover">Каверы</button>
-    <button class="tab" data-view="library">Библиотека</button>
+    <button class="tab" data-view="library">Архив</button>
     <button class="tab" data-view="settings">Настройки</button>
   </nav>
   <div class="engine-badge" id="engineBadge" title="Состояние моделей">…</div>
@@ -177,7 +177,7 @@
           placeholder="[verse]&#10;Новый текст на мелодию оригинала…&#10;&#10;[chorus]&#10;…&#10;&#10;Оставьте поле пустым — получится инструментальная версия."></textarea>
         <div class="lyrics-tools">
           <button type="button" class="btn" id="c-lyricsFix" title="Русские теги секций → английские, пустые строки, автоматическая разметка">Подготовить текст</button>
-          <button type="button" class="btn" id="c-lyricsOrig" hidden title="Подставить текст трека-исходника из библиотеки">Текст оригинала</button>
+          <button type="button" class="btn" id="c-lyricsOrig" hidden title="Подставить текст трека-исходника из архива">Текст оригинала</button>
           <span class="hint" id="c-lyricsWarn"></span>
         </div>
         <p class="hint">Мелодия, ритм и структура берутся из исходника, поэтому текст лучше раскладывать по тем же
@@ -211,7 +211,7 @@
             <div class="sp-head">
               <div class="segmented sp-tabs" id="c-spTabs">
                 <button type="button" data-tab="uploads">Мои файлы <em id="c-spCount"></em></button>
-                <button type="button" data-tab="library">Из библиотеки</button>
+                <button type="button" data-tab="library">Из архива</button>
               </div>
               <input type="search" id="c-spSearch" placeholder="Поиск">
             </div>

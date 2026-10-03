@@ -484,11 +484,11 @@ function jobsHtml() {
   }).join("");
 }
 
-/* ===================== оценки и удаление треков (общие для очереди и библиотеки) ===================== */
+/* ===================== оценки и удаление треков (общие для очереди и архива) ===================== */
 function rateButtons(t) {
   const r = t.rating || 0;
   return `<button class="btn icon rate like${r === 1 ? " on" : ""}" data-qact="like" title="${r === 1 ? "Снять лайк" : "Нравится"}">👍</button>` +
-    `<button class="btn icon rate dislike${r === -1 ? " on" : ""}" data-qact="dislike" title="${r === -1 ? "Снять дизлайк" : "Не нравится — убрать из очереди и скрыть в библиотеке"}">👎</button>`;
+    `<button class="btn icon rate dislike${r === -1 ? " on" : ""}" data-qact="dislike" title="${r === -1 ? "Снять дизлайк" : "Не нравится — убрать из очереди и скрыть в архиве"}">👎</button>`;
 }
 
 async function rateTrack(t, value) {
@@ -629,7 +629,7 @@ $("#pSeek").addEventListener("change", () => {
 $("#pVol").addEventListener("input", () => (audio.volume = Number($("#pVol").value)));
 audio.volume = 0.9;
 
-/* ===================== «Библиотека» ===================== */
+/* ===================== «Архив» ===================== */
 async function loadLibrary() {
   const rating = encodeURIComponent($("#libRating").value || "visible");
   const [f, t] = await Promise.all([
@@ -1167,7 +1167,7 @@ function renderSourcePanel() {
   }).join("");
   const empty = q ? "Ничего не найдено"
     : SP.tab === "uploads" ? "Загруженных файлов пока нет — перетащите сюда песню, на которую хотите сделать кавер"
-    : "В библиотеке пока нет треков";
+    : "В архиве пока нет треков";
   $("#c-spList").innerHTML = pending + rows || `<div class="sp-empty">${esc(empty)}</div>`;
   spSyncPlaying();
 }
@@ -1209,7 +1209,7 @@ async function spRename(it) {
 
 async function spDelete(it) {
   const text = `Файл «${it.name}» будет удалён с диска.` + (it.covers
-    ? ` Сделанные из него каверы (${it.covers}) останутся в библиотеке, но повторить их с этим исходником не получится.` : "");
+    ? ` Сделанные из него каверы (${it.covers}) останутся в архиве, но повторить их с этим исходником не получится.` : "");
   if (!(await dialog({ title: "Удалить исходник?", text, ok: "Удалить", danger: true }))) return;
   try { await api(`/sources/${it.id}`, { method: "DELETE" }); } catch (err) { alert(err.message); }
   if (SP.playing === it.key) { srcPrev.pause(); srcPrev.removeAttribute("src"); SP.playing = null; }
@@ -1273,7 +1273,7 @@ async function setCoverSource(src, decoded = null, sel = null) {
   renderSourcePanel();
   if (!src) { coverPrev.removeAttribute("src"); return; }
   $("#c-srcName").textContent = src.name;
-  $("#c-srcInfo").textContent = `${src.kind === "upload" ? "загруженный файл" : "трек из библиотеки"} · ${fmtTime(src.duration)}`;
+  $("#c-srcInfo").textContent = `${src.kind === "upload" ? "загруженный файл" : "трек из архива"} · ${fmtTime(src.duration)}`;
   coverPrev.src = src.url;
   const max = (S.settings && S.settings.max_duration) || 300;
   C.start = sel ? sel.start || 0 : 0;
@@ -1487,7 +1487,7 @@ async function applyRequestToCover(req, { show = true, quiet = false } = {}) {
   } else if (req.source_track_id) {
     const t = S.trackCache[req.source_track_id];
     if (t) setCoverSource(trackSource(t), null, sel);
-    else { setCoverSource(null); if (!quiet) coverMsg("Трек-исходник удалён из библиотеки", "err"); }
+    else { setCoverSource(null); if (!quiet) coverMsg("Трек-исходник удалён из архива", "err"); }
   }
 }
 
@@ -1519,7 +1519,7 @@ async function restoreUiState() {
     const st = await api("/ui-state");
     if (st.create) applyRequestToForm(st.create, { show: false });
     if (st.cover) {
-      await loadSourcePanel();   // трек-исходник из библиотеки должен быть в кэше
+      await loadSourcePanel();   // трек-исходник из архива должен быть в кэше
       await applyRequestToCover(st.cover, { show: false, quiet: true });
     }
   } catch { /* нет состояния — значения по умолчанию */ }

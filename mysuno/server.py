@@ -82,7 +82,7 @@ class GenerateRequest(BaseModel):
 class CoverRequest(GenerateRequest):
     """Кавер: исходник задаёт мелодию, ритм и структуру; стиль — жанры/описание; текст пуст → инструментал."""
     source_id: str | None = None          # загруженный файл (data/sources)
-    source_track_id: str | None = None    # или трек из библиотеки
+    source_track_id: str | None = None    # или трек из архива
     source_name: str = Field("", max_length=120)
     start: float = Field(0, ge=0)          # фрагмент исходника, с
     end: float | None = Field(None, ge=0)  # None = до конца
@@ -227,7 +227,7 @@ async def upload_source(request: Request):
 
 @app.get("/api/sources")
 def list_sources():
-    """Загруженные исходники + сколько каверов из каждого сделано (по параметрам треков библиотеки)."""
+    """Загруженные исходники + сколько каверов из каждого сделано (по параметрам треков архива)."""
     used: dict[str, int] = {}
     for track in library.list_tracks("all"):
         req = (track.get("params") or {}).get("request") or {}
@@ -272,7 +272,7 @@ def delete_source(source_id: str):
 def cover(body: CoverRequest):
     settings = config.load_settings()
     if bool(body.source_id) == bool(body.source_track_id):
-        raise HTTPException(400, "Загрузите файл или выберите трек из библиотеки")
+        raise HTTPException(400, "Загрузите файл или выберите трек из архива")
     try:
         if body.source_id:
             total = sources.get_source(body.source_id)["duration"]

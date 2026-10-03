@@ -177,16 +177,17 @@ class JobManager:
         track = self.library.get_track(req.get("source_track_id") or "")
         path = config.TRACKS_DIR / track["filename"] if track else None
         if not path or not path.exists():
-            raise sources.SourceError("Трек-исходник удалён из библиотеки")
+            raise sources.SourceError("Трек-исходник удалён из архива")
         return path
 
     def _generate_and_store(self, job: Job, req: dict[str, Any], settings: dict[str, Any], progress,
                             tmp: Path) -> None:
         result = self.engine.generate(req, settings, progress, tmp)
-        progress(0.99, "Сохранение в библиотеку…")
+        progress(0.99, "Сохранение в архив…")
 
         base_title = (req.get("title") or "").strip() or _auto_title(req)
-        for t in result["tracks"]:
+        n = len(result["tracks"])
+        for i, t in enumerate(result["tracks"], start=1):
             src = Path(t["path"])
             track_id = uuid.uuid4().hex[:16]
             dst = config.TRACKS_DIR / f"{track_id}{src.suffix}"
