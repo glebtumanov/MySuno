@@ -187,7 +187,7 @@ function caretXY(ta, pos) {
 }
 
 /* Автодополнение жанров в поле описания; onChange(parsed) — после каждого изменения текста */
-function genreAutocomplete(ta, { allowNeg, onChange }) {
+function genreAutocomplete(ta, { allowNeg, onChange, noteText = "" }) {
   const box = document.createElement("div");
   box.className = "gac";
   box.hidden = true;
@@ -203,9 +203,11 @@ function genreAutocomplete(ta, { allowNeg, onChange }) {
     for (let i = pos - 1; i >= 0 && i >= pos - 32; i--) {
       const ch = before[i];
       if (ch === "\n") return null;
-      if ((ch === "+" || (ch === "-" && allowNeg)) && (i === 0 || /[\s,;(]/.test(before[i - 1]))) {
+      if ((ch === "+" || ch === "-") && (i === 0 || /[\s,;(]/.test(before[i - 1]))) {
         const q = before.slice(i + 1);
         if (/^\s/.test(q)) return null;   // «текст - текст» — обычное тире, не жанр
+        // исключать жанры здесь нельзя — подсказываем почему (только сразу после минуса, дальше не мешаем)
+        if (ch === "-" && !allowNeg) return q.length <= 2 ? { start: i, sign: ch, q, note: true } : null;
         return { start: i, sign: ch, q: q.toLowerCase() };
       }
     }
@@ -229,10 +231,18 @@ function genreAutocomplete(ta, { allowNeg, onChange }) {
   }
 
   function render() {
+    if (ctx.note) {
+      box.innerHTML = `<div class="gac-note">${esc(noteText)}</div>`;
+      return place();
+    }
     box.innerHTML = `<div class="gac-head">${ctx.sign === "+" ? "Добавить жанр" : "Исключить жанр"}</div>` +
       ctx.items.map((g, i) => `<div class="gac-item${i === ctx.idx ? " on" : ""}" role="option" data-i="${i}">` +
         `<span class="gac-sign ${ctx.sign === "+" ? "plus" : "minus"}">${ctx.sign === "+" ? "+" : "−"}</span>${esc(g.label)}` +
         `${g.alias ? `<em>${esc(g.alias)}</em>` : ""}</div>`).join("");
+    place();
+  }
+
+  function place() {
     const xy = caretXY(ta, ctx.start);
     box.hidden = false;
     const w = box.offsetWidth, h = box.offsetHeight;
@@ -247,6 +257,7 @@ function genreAutocomplete(ta, { allowNeg, onChange }) {
 
   function update() {
     const c = findContext();
+    if (c && c.note) { ctx = { ...c, items: [], idx: 0 }; render(); return; }
     const items = c ? matches(c.q, c.sign) : [];
     if (!c || !items.length) { close(); return; }
     const keep = ctx && ctx.start === c.start ? ctx.items[ctx.idx] : null;
@@ -277,6 +288,7 @@ function genreAutocomplete(ta, { allowNeg, onChange }) {
   ta.addEventListener("keyup", (e) => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) update(); });
   ta.addEventListener("keydown", (e) => {
     if (!ctx) return;
+    if (ctx.note) { if (e.key === "Escape") { e.preventDefault(); close(); } return; }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       ctx.idx = (ctx.idx + (e.key === "ArrowDown" ? 1 : -1) + ctx.items.length) % ctx.items.length;
@@ -1361,7 +1373,9 @@ function saveCoverPrefs() {
 
 function initCover() {
   const p = S.presets;
-  genreAutocomplete($("#c-prompt"), { allowNeg: false, onChange: (pg) => { setTo(C.genres, pg.genres); syncCoverChips(); } });
+  genreAutocomplete($("#c-prompt"), { allowNeg: false,
+    noteText: "В каверах исключить жанр нельзя: мелодию и структуру задаёт исходник, языковая модель не участвует, "
+      + "а исключение жанра в ACE работает только через неё. Просто не добавляйте ненужный жанр.", onChange: (pg) => { setTo(C.genres, pg.genres); syncCoverChips(); } });
   chipGroup($("#c-moodChips"), p.moods, C.moods, { sync: syncCoverChips });
   $("#c-vocalSeg").innerHTML = p.vocals.map((v) => `<button type="button" data-id="${esc(v.id)}">${esc(v.label)}</button>`).join("");
   $("#c-vocalSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { C.vocal = b.dataset.id; syncCoverChips(); } });
