@@ -23,7 +23,7 @@ class AutoTitleTests(unittest.TestCase):
     def test_genres_first(self):
         from mysuno.jobs import _auto_title
 
-        self.assertEqual(_auto_title({"genres": ["rock", "jazz"], "prompt": "дождь"}), "Рок, Джаз")
+        self.assertEqual(_auto_title({"genres": ["rock", "jazz"], "prompt": "дождь"}), "Rock, Jazz")
         self.assertEqual(_auto_title({"genres": [], "prompt": "дождь"}), "дождь")
         self.assertEqual(_auto_title({}), "Без названия")
 

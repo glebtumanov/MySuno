@@ -304,7 +304,7 @@ def cover(body: CoverRequest):
 
 # ------------------------------------------------------------------ библиотека звучаний
 class SampleRequest(BaseModel):
-    kind: str = Field(..., pattern="^(genre|mood|neg)$")
+    kind: str = Field(..., pattern="^(genre|mood)$")
     id: str = Field(..., max_length=40)
     replace: bool = False   # True — сгенерировать заново, даже если сэмпл уже есть
 
@@ -329,6 +329,34 @@ def create_sample(body: SampleRequest):
     if k in samples.list_samples() and not body.replace:
         raise HTTPException(409, "Сэмпл уже есть в библиотеке")
     return jobs.submit(request).to_dict()
+
+
+class SampleAllRequest(BaseModel):
+    replace: bool = True   # True — пересоздать и готовые; False — только недостающие
+
+
+@app.post("/api/samples/all")
+def create_all_samples(body: SampleAllRequest):
+    """Ставит в очередь сэмплы всех жанров и настроений (кроме уже ждущих в очереди)."""
+    pending, have = jobs.pending_samples(), samples.list_samples()
+    queued = 0
+    for kind, preset_id in samples.all_presets():
+        k = samples.key(kind, preset_id)
+        if k in pending or (k in have and not body.replace):
+            continue
+        jobs.submit(samples.build_request(kind, preset_id))
+        queued += 1
+    return {"queued": queued}
+
+
+@app.delete("/api/samples")
+def delete_all_samples():
+    """Удаляет все сэмплы и снимает с очереди ещё не начатые."""
+    for job_id in jobs.pending_samples().values():
+        job = jobs.get(job_id)
+        if job and job.status == "queued":
+            jobs.cancel(job_id)
+    return {"deleted": samples.delete_all()}
 
 
 @app.get("/api/samples/{kind}/{preset_id}/audio")

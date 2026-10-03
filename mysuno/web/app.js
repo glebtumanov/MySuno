@@ -631,7 +631,11 @@ $("#pPrev").addEventListener("click", () => step(-1));
 $("#pNext").addEventListener("click", () => step(1));
 audio.addEventListener("play", () => { $("#pPlay").textContent = "⏸"; markPlaying(); coverPrev.pause(); srcPrev.pause(); });
 audio.addEventListener("pause", () => { $("#pPlay").textContent = "▶"; markPlaying(); });
-audio.addEventListener("ended", () => step(1));
+audio.addEventListener("ended", () => {
+  // сэмплы библиотеки: дальше по списку — только с галочкой «Переходить на следующий сэмпл»
+  if (S.playingId && S.playingId.startsWith("smp:") && !$("#smpAuto").checked) return;
+  step(1);
+});
 audio.addEventListener("loadedmetadata", () => ($("#pDur").textContent = fmtTime(audio.duration)));
 audio.addEventListener("timeupdate", () => {
   $("#pCur").textContent = fmtTime(audio.currentTime);
@@ -836,15 +840,12 @@ function toggleDetails(row, t) {
 }
 
 /* ===================== «Библиотека» звучаний ===================== */
-/* Минутные сэмплы жанров, настроений и негативных жанров. Генерируются по одному по запросу и хранятся отдельно
-   от архива (data/samples). Ключ сэмпла — «вид-id»: genre-rock, mood-sad, neg-metal. */
+/* Минутные сэмплы жанров и настроений. Генерируются по одному по запросу и хранятся отдельно
+   от архива (data/samples). Ключ сэмпла — «вид-id»: genre-rock, mood-sad. */
 const LIB = { samples: {}, pending: {}, seconds: 60, sig: "", loaded: false };
 const SMP_SECTIONS = [
   { kind: "genre", title: "Жанры", items: () => S.presets.genres, set: () => S.genres },
   { kind: "mood", title: "Настроение", items: () => S.presets.moods, set: () => S.moods },
-  { kind: "neg", title: "Негативные жанры", items: () => S.presets.genres, set: () => S.neg,
-    hint: "Сэмпл без описания и жанров, где этот жанр передан LM как негативный — сравните с сэмплом самого жанра. "
-      + "⚠ Экспериментально: на turbo-модели в наших A/B-тестах заметного эффекта не было." },
 ];
 const smpKey = (kind, id) => `${kind}-${id}`;
 const smpSection = (kind) => SMP_SECTIONS.find((s) => s.kind === kind);
@@ -854,7 +855,7 @@ function smpTrack(kind, item) {
   return {
     id: "smp:" + k, duration: m.duration,
     url: `/api/samples/${kind}/${encodeURIComponent(item.id)}/audio?f=${encodeURIComponent(m.filename)}`,
-    title: kind === "neg" ? `Сэмпл · без жанра «${item.label}»` : `Сэмпл · ${item.label}`,
+    title: `Сэмпл · ${item.label}`,
   };
 }
 
@@ -893,7 +894,7 @@ function smpTile(sec, item) {
   const k = smpKey(sec.kind, item.id), m = LIB.samples[k], jobId = LIB.pending[k];
   const inForm = sec.set().has(item.id);
   const useBtn = `<button class="btn icon smp-use${inForm ? " on" : ""}" data-sact="use" title="${inForm ? "Убрать из формы «Создать»"
-    : sec.kind === "neg" ? "Исключить этот жанр в форме «Создать»" : "Добавить в форму «Создать»"}">${inForm ? "✓" : "⊕"}</button>`;
+    : "Добавить в форму «Создать»"}">${inForm ? "✓" : "⊕"}</button>`;
   let state, left, sub, actions;
   if (jobId) {
     state = "pending";
@@ -920,7 +921,7 @@ function smpTile(sec, item) {
     .filter(Boolean).join("\n") : "";
   return `<div class="smp ${state}" data-kind="${sec.kind}" data-id="${esc(item.id)}" data-pid="smp:${esc(k)}"${tip ? ` title="${esc(tip)}"` : ""}>
     ${left}
-    <div class="smp-meta"><div class="smp-name">${sec.kind === "neg" ? "без: " : ""}${esc(item.label)}</div><div class="smp-sub">${sub}</div></div>
+    <div class="smp-meta"><div class="smp-name">${esc(item.label)}</div><div class="smp-sub">${sub}</div></div>
     <div class="smp-actions">${actions}</div>
   </div>`;
 }
@@ -935,7 +936,7 @@ function renderSamples() {
     have += ready; total += all.length;
     const shown = all.filter((i) => {
       const k = smpKey(sec.kind, i.id);
-      if (q && !i.label.toLowerCase().includes(q)) return false;
+      if (q && ![i.label.toLowerCase(), i.id, i.alias || ""].some((v) => v.includes(q))) return false;
       if (filter === "have") return !!LIB.samples[k];
       if (filter === "missing") return !LIB.samples[k];
       return true;
@@ -968,14 +969,13 @@ async function makeSample(kind, id, replace = false) {
   pollNow();
 }
 
-/* ⊕ — добавить пресет в форму «Создать» (или убрать); жанр не бывает одновременно желаемым и исключённым */
+/* ⊕ — добавить пресет в форму «Создать» (или убрать) */
 function toggleInForm(kind, id) {
   const set = smpSection(kind).set();
   if (set.has(id)) set.delete(id);
   else {
     set.add(id);
-    if (kind === "genre") S.neg.delete(id);
-    if (kind === "neg") S.genres.delete(id);
+    if (kind === "genre") S.neg.delete(id);   // жанр не бывает одновременно желаемым и исключённым
   }
   syncChips();
   scheduleUiSave();
@@ -987,13 +987,17 @@ $("#smpSections").addEventListener("click", async (e) => {
   if (!btn || !tile) return;
   const { kind, id } = tile.dataset, sec = smpSection(kind);
   const item = sec.items().find((i) => i.id === id);
-  const label = (kind === "neg" ? "без жанра " : "") + `«${item.label}»`;
+  const label = `«${item.label}»`;
   switch (btn.dataset.sact) {
     case "play": {
       const t = smpTrack(kind, item);
       if (S.playingId === t.id && audio.src) { audio.paused ? audio.play() : audio.pause(); break; }
-      // ⏮/⏭ листают готовые сэмплы этого раздела
-      playTrack(t, sec.items().filter((i) => LIB.samples[smpKey(kind, i.id)]).map((i) => smpTrack(kind, i)));
+      // очередь плеера — готовые сэмплы в том порядке, в каком они сейчас показаны (с учётом поиска и фильтра)
+      const list = $$("#smpSections .smp.have").map((el) => {
+        const s2 = smpSection(el.dataset.kind);
+        return smpTrack(el.dataset.kind, s2.items().find((i) => i.id === el.dataset.id));
+      });
+      playTrack(t, list);
       break;
     }
     case "make": makeSample(kind, id); break;
@@ -1012,6 +1016,30 @@ $("#smpSections").addEventListener("click", async (e) => {
     }
     case "use": toggleInForm(kind, id); break;
   }
+});
+$("#smpRegenAll").addEventListener("click", async () => {
+  const n = SMP_SECTIONS.reduce((a, sec) => a + sec.items().length, 0);
+  const ok = await dialog({ title: "Пересоздать все сэмплы?",
+    text: `В очередь встанут ${n} сэмплов (все жанры и настроения), готовые будут заменены новыми по мере генерации. `
+      + `Это займёт порядка ${Math.ceil((n * 10) / 60)} мин; очередь можно остановить.`, ok: "Пересоздать" });
+  if (!ok) return;
+  try { await api("/samples/all", { method: "POST", body: { replace: true } }); } catch (err) { alert(err.message); return; }
+  loadSamples();
+  pollNow();
+});
+$("#smpDeleteAll").addEventListener("click", async () => {
+  const n = Object.keys(LIB.samples).length;
+  const ok = await dialog({ title: "Удалить все сэмплы?",
+    text: `Будут удалены все сэмплы библиотеки (${n}), ожидающие в очереди сэмплы — отменены.`, ok: "Удалить всё", danger: true });
+  if (!ok) return;
+  if (S.playingId && S.playingId.startsWith("smp:")) { audio.pause(); audio.removeAttribute("src"); S.playingId = null; $("#pTitle").textContent = "Ничего не играет"; }
+  try { await api("/samples", { method: "DELETE" }); } catch (err) { alert(err.message); }
+  pollNow();
+  loadSamples();
+});
+try { $("#smpAuto").checked = localStorage.getItem("smpAuto") !== "0"; } catch { /* ok */ }
+$("#smpAuto").addEventListener("change", () => {
+  try { localStorage.setItem("smpAuto", $("#smpAuto").checked ? "1" : "0"); } catch { /* ok */ }
 });
 let smpSearchTimer = null;
 $("#smpSearch").addEventListener("input", () => { clearTimeout(smpSearchTimer); smpSearchTimer = setTimeout(renderSamples, 150); });

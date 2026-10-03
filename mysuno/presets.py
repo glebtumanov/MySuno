@@ -3,51 +3,65 @@ from __future__ import annotations
 
 # (id, подпись в UI, английские теги)
 GENRES: list[tuple[str, str, str]] = [
-    ("pop", "Поп", "pop, catchy melody"),
+    ("pop", "Pop", "pop, catchy melody"),
     ("ruspop", "Русская эстрада", "russian pop, estrada"),
-    ("rock", "Рок", "rock, electric guitars, live drums"),
-    ("hardrock", "Хард-рок", "hard rock, distorted guitars, powerful drums"),
-    ("metal", "Метал", "heavy metal, aggressive guitars, double bass drums"),
-    ("punk", "Панк", "punk rock, fast, raw energy"),
-    ("indie", "Инди", "indie rock, jangly guitars"),
-    ("hiphop", "Хип-хоп", "hip hop, boom bap beat"),
-    ("rap", "Рэп", "rap, rhythmic rap vocals"),
-    ("trap", "Трэп", "trap, 808 bass, rolling hi-hats"),
+    ("sovpop", "Советская эстрада", "soviet pop, 1970s estrada, vintage orchestral pop, warm brass and strings"),
+    ("rock", "Rock", "rock, electric guitars, live drums"),
+    ("hardrock", "Hard rock", "hard rock, distorted guitars, powerful drums"),
+    ("metal", "Metal", "heavy metal, aggressive guitars, double bass drums"),
+    ("punk", "Punk", "punk rock, fast, raw energy"),
+    ("grunge", "Grunge", "grunge, 90s alternative rock, distorted guitars, raw vocals"),
+    ("indie", "Indie", "indie rock, jangly guitars"),
+    ("hiphop", "Hip-hop", "hip hop, boom bap beat"),
+    ("rap", "Rap", "rap, rhythmic rap vocals"),
+    ("trap", "Trap", "trap, 808 bass, rolling hi-hats"),
     ("rnb", "R&B", "r&b, smooth groove"),
-    ("soul", "Соул", "soul, warm organ, groovy bass"),
-    ("funk", "Фанк", "funk, slap bass, groovy rhythm"),
-    ("jazz", "Джаз", "jazz, piano, double bass, brushed drums"),
-    ("blues", "Блюз", "blues, electric guitar, slow shuffle"),
+    ("soul", "Soul", "soul, warm organ, groovy bass"),
+    ("funk", "Funk", "funk, slap bass, groovy rhythm"),
+    ("jazz", "Jazz", "jazz, piano, double bass, brushed drums"),
+    ("blues", "Blues", "blues, electric guitar, slow shuffle"),
     ("classical", "Классика", "classical, orchestral, strings"),
+    ("symphonic", "Симфонический оркестр", "symphony orchestra, full orchestral, strings, brass, woodwinds, timpani"),
     ("neoclassical", "Неоклассика", "neoclassical, modern classical, piano and strings, minimalist"),
     ("impressionist", "Импрессионизм", "impressionistic piano, debussy style, lush harmonies, flowing arpeggios"),
     ("cinematic", "Кино-оркестр", "cinematic orchestral, epic, strings and brass"),
+    ("oldfilm", "Старое кино", "vintage film score, 1950s movie soundtrack, old orchestra, nostalgic"),
     ("ghibli", "Музыка Гибли", "studio ghibli style, whimsical orchestral, piano, strings, nostalgic"),
     ("pastoral", "Пастораль", "pastoral, flute, gentle strings, idyllic countryside"),
     ("electronic", "Электроника", "electronic, synthesizers"),
     ("edm", "EDM", "edm, festival, big drop"),
-    ("house", "Хаус", "house, four on the floor, club"),
-    ("techno", "Техно", "techno, driving, hypnotic"),
-    ("trance", "Транс", "trance, uplifting, arpeggios"),
-    ("dnb", "Драм-н-бейс", "drum and bass, fast breakbeats, heavy bass"),
-    ("dubstep", "Дабстеп", "dubstep, wobble bass"),
-    ("synthwave", "Синтвейв", "synthwave, retro 80s synths"),
-    ("lofi", "Лоу-фай", "lo-fi hip hop, chill, vinyl crackle"),
-    ("ambient", "Эмбиент", "ambient, atmospheric pads, slow"),
-    ("country", "Кантри", "country, acoustic guitar, pedal steel"),
-    ("folk", "Фолк", "folk, acoustic guitar"),
+    ("house", "House", "house, four on the floor, club"),
+    ("techno", "Techno", "techno, driving, hypnotic"),
+    ("trance", "Trance", "trance, uplifting, arpeggios"),
+    ("dnb", "Drum and bass", "drum and bass, fast breakbeats, heavy bass"),
+    ("dubstep", "Dubstep", "dubstep, wobble bass"),
+    ("synthwave", "Synthwave", "synthwave, retro 80s synths"),
+    ("lofi", "Lo-fi", "lo-fi hip hop, chill, vinyl crackle"),
+    ("ambient", "Ambient", "ambient, atmospheric pads, slow"),
+    ("country", "Country", "country, acoustic guitar, pedal steel"),
+    ("folk", "Folk", "folk, acoustic guitar"),
     ("acoustic", "Акустика", "acoustic, unplugged, guitar"),
-    ("reggae", "Регги", "reggae, offbeat guitar, dub bass"),
-    ("latin", "Латино", "latin, percussion, rhythmic"),
-    ("bossa", "Босса-нова", "bossa nova, nylon guitar, soft"),
-    ("disco", "Диско", "disco, funky bass, strings"),
+    ("reggae", "Reggae", "reggae, offbeat guitar, dub bass"),
+    ("latin", "Latin", "latin, percussion, rhythmic"),
+    ("bossa", "Bossa nova", "bossa nova, nylon guitar, soft"),
+    ("disco", "Disco", "disco, funky bass, strings"),
     ("kpop", "K-pop", "k-pop, polished, dance"),
     ("chanson", "Русский шансон", "russian chanson, acoustic guitar, storytelling"),
     ("frchanson", "Французский шансон", "french chanson, accordion, parisian cafe"),
     ("romance", "Романс", "russian romance, classical guitar, piano, heartfelt vocals"),
     ("ballad", "Баллада", "ballad, emotional, slow tempo"),
-    ("gospel", "Госпел", "gospel, choir, organ"),
+    ("gospel", "Gospel", "gospel, choir, organ"),
 ]
+
+# Русские названия жанров с латинской подписью — для поиска («рок» находит Rock)
+GENRE_ALIASES: dict[str, str] = {
+    "pop": "поп", "rock": "рок", "hardrock": "хард-рок", "metal": "метал", "punk": "панк", "grunge": "гранж",
+    "indie": "инди", "hiphop": "хип-хоп", "rap": "рэп", "trap": "трэп", "rnb": "ар-н-би", "soul": "соул",
+    "funk": "фанк", "jazz": "джаз", "blues": "блюз", "edm": "электронная танцевальная", "house": "хаус",
+    "techno": "техно", "trance": "транс", "dnb": "драм-н-бейс", "dubstep": "дабстеп", "synthwave": "синтвейв",
+    "lofi": "лоу-фай", "ambient": "эмбиент", "country": "кантри", "folk": "фолк", "reggae": "регги",
+    "latin": "латино", "bossa": "босса-нова", "disco": "диско", "kpop": "кей-поп", "gospel": "госпел",
+}
 
 MOODS: list[tuple[str, str, str]] = [
     ("sad", "Грустное", "sad, melancholic"),
@@ -83,11 +97,11 @@ MOOD_CONFLICTS: list[tuple[str, str]] = [
     ("sad", "happy"), ("dark", "happy"), ("calm", "energetic"), ("calm", "epic"),
     ("dreamy", "energetic"), ("sad", "energetic"),
 ]
-_HEAVY = ["metal", "hardrock", "punk", "dnb", "dubstep", "trap", "edm"]
+_HEAVY = ["metal", "hardrock", "punk", "grunge", "dnb", "dubstep", "trap", "edm"]
 GENRE_CONFLICTS: list[tuple[str, str]] = (
     [("ambient", g) for g in _HEAVY] + [("classical", g) for g in _HEAVY] + [("lofi", g) for g in _HEAVY]
     + [("bossa", g) for g in _HEAVY]
-    + [(a, g) for a in ("neoclassical", "impressionist", "ghibli", "pastoral", "romance") for g in _HEAVY] + [("acoustic", g) for g in ("dubstep", "edm", "techno", "dnb", "metal")]
+    + [(a, g) for a in ("neoclassical", "impressionist", "ghibli", "pastoral", "romance", "symphonic", "oldfilm") for g in _HEAVY] + [("acoustic", g) for g in ("dubstep", "edm", "techno", "dnb", "metal")]
     + [("folk", g) for g in ("dubstep", "edm", "dnb", "metal")]
 )
 MAX_GENRES = 3
@@ -96,7 +110,7 @@ MAX_GENRES = 3
 def presets_payload() -> dict:
     """Данные для UI."""
     return {
-        "genres": [{"id": i, "label": l} for i, l, _ in GENRES],
+        "genres": [{"id": i, "label": l, "alias": GENRE_ALIASES.get(i, "")} for i, l, _ in GENRES],
         "moods": [{"id": i, "label": l} for i, l, _ in MOODS],
         "vocals": [{"id": i, "label": l, "instrumental": inst} for i, l, _, inst in VOCALS],
         "conflicts": {"genres": GENRE_CONFLICTS, "moods": MOOD_CONFLICTS, "max_genres": MAX_GENRES},

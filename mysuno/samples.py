@@ -1,4 +1,4 @@
-"""Библиотека звучаний: минутные сэмплы жанров, настроений и негативных жанров.
+"""Библиотека звучаний: минутные сэмплы жанров и настроений.
 
 Сэмплы не попадают в архив: файлы лежат в data/samples, описание — в data/samples/index.json.
 Генерируются по запросу пользователя (по одному), повторная генерация заменяет прежний сэмпл.
@@ -17,7 +17,7 @@ from . import config, presets
 SAMPLES_DIR = config.DATA / "samples"
 INDEX_FILE = SAMPLES_DIR / "index.json"
 SAMPLE_SECONDS = 60
-KINDS = ("genre", "mood", "neg")   # жанр | настроение | негативный жанр
+KINDS = ("genre", "mood")   # жанр | настроение
 
 SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
 _lock = threading.Lock()
@@ -43,8 +43,7 @@ def validate(kind: str, preset_id: str) -> str:
 
 
 def title(kind: str, preset_id: str) -> str:
-    label = validate(kind, preset_id)
-    return f"Сэмпл: без жанра «{label}»" if kind == "neg" else f"Сэмпл: {label}"
+    return f"Сэмпл: {validate(kind, preset_id)}"
 
 
 def build_request(kind: str, preset_id: str) -> dict[str, Any]:
@@ -54,7 +53,6 @@ def build_request(kind: str, preset_id: str) -> dict[str, Any]:
         "prompt": "",
         "genres": [preset_id] if kind == "genre" else [],
         "moods": [preset_id] if kind == "mood" else [],
-        "negative_genres": [preset_id] if kind == "neg" else [],
         "vocal": "auto",
         "lyrics": "",
         "auto_lyrics": True,
@@ -87,6 +85,11 @@ def list_samples() -> dict[str, Any]:
     with _lock:
         index = _read_index()
     return {k: v for k, v in index.items() if (SAMPLES_DIR / v.get("filename", "")).is_file()}
+
+
+def all_presets() -> list[tuple[str, str]]:
+    """(вид, id) всех пресетов библиотеки в порядке показа."""
+    return [(kind, i) for kind in KINDS for i in _labels(kind)]
 
 
 def sample_file(kind: str, preset_id: str) -> Path:
@@ -122,3 +125,14 @@ def delete(kind: str, preset_id: str) -> None:
             raise KeyError("Сэмпла нет")
         _write_index(index)
     (SAMPLES_DIR / old["filename"]).unlink(missing_ok=True)
+
+
+def delete_all() -> int:
+    """Удаляет все сэмплы; возвращает их число."""
+    with _lock:
+        index = _read_index()
+        _write_index({})
+    for meta in index.values():
+        if meta.get("filename"):
+            (SAMPLES_DIR / meta["filename"]).unlink(missing_ok=True)
+    return len(index)
