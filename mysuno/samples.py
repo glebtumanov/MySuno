@@ -61,7 +61,8 @@ def build_request(kind: str, preset_id: str) -> dict[str, Any]:
         "prompt": "",
         "genres": [preset_id] if kind == "genre" else [],
         "moods": [preset_id] if kind == "mood" else [],
-        "vocal": "auto",
+        # жанр без обязательного вокала — инструментальный сэмпл; настроения — с вокалом на выбор LM
+        "vocal": "none" if kind == "genre" and preset_id not in presets.VOCAL_GENRES else "auto",
         "lyrics": "",
         "auto_lyrics": True,
         "thinking": True,

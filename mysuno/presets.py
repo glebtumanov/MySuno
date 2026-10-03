@@ -22,6 +22,9 @@ GENRES: list[tuple[str, str, str]] = [
     ("blues", "Blues", "blues, electric guitar, slow shuffle"),
     ("classical", "Классика", "classical, orchestral, strings"),
     ("symphonic", "Симфонический оркестр", "symphony orchestra, full orchestral, strings, brass, woodwinds, timpani"),
+    ("opera", "Опера", "opera, operatic soprano and tenor, dramatic aria, full orchestra"),
+    ("operetta", "Оперетта", "operetta, light classical, theatrical vocals, waltz rhythm, orchestra"),
+    ("disney", "Сказки Диснея", "disney fairytale musical, broadway style, magical orchestral, storytelling vocals"),
     ("neoclassical", "Неоклассика", "neoclassical, modern classical, piano and strings, minimalist"),
     ("impressionist", "Импрессионизм", "impressionistic piano, debussy style, lush harmonies, flowing arpeggios"),
     ("cinematic", "Кино-оркестр", "cinematic orchestral, epic, strings and brass"),
@@ -47,6 +50,7 @@ GENRES: list[tuple[str, str, str]] = [
     ("bossa", "Bossa nova", "bossa nova, nylon guitar, soft"),
     ("disco", "Disco", "disco, funky bass, strings"),
     ("kpop", "K-pop", "k-pop, polished, dance"),
+    ("citypop", "Japanese city pop", "japanese city pop, 80s, funky bass, electric piano, smooth groove, glossy synths"),
     ("chanson", "Русский шансон", "russian chanson, acoustic guitar, storytelling"),
     ("frchanson", "Французский шансон", "french chanson, accordion, parisian cafe"),
     ("romance", "Романс", "russian romance, classical guitar, piano, heartfelt vocals"),
@@ -62,13 +66,19 @@ GENRE_ALIASES: dict[str, str] = {
     "funk": "фанк", "jazz": "джаз", "blues": "блюз", "edm": "электронная танцевальная", "house": "хаус",
     "techno": "техно", "trance": "транс", "dnb": "драм-н-бейс", "dubstep": "дабстеп", "synthwave": "синтвейв", "newwave": "нью-вейв новая волна",
     "lofi": "лоу-фай", "ambient": "эмбиент", "country": "кантри", "folk": "фолк", "reggae": "регги",
-    "latin": "латино", "bossa": "босса-нова", "disco": "диско", "kpop": "кей-поп", "gospel": "госпел",
+    "latin": "латино", "bossa": "босса-нова", "disco": "диско", "kpop": "кей-поп", "citypop": "японский сити-поп", "gospel": "госпел",
 }
 
 # Жанры, в которых «зашит» язык вокала (код языка ACE); остальные сэмплы жанров поются по-английски
+# Жанры, которые без вокала теряют смысл: их сэмплы поются, сэмплы остальных жанров — инструментальные
+VOCAL_GENRES: frozenset[str] = frozenset({
+    "pop", "ruspop", "sovpop", "kpop", "hiphop", "rap", "rnb", "soul", "gospel",
+    "chanson", "frchanson", "romance", "ballad", "gregorian", "opera", "operetta", "disney",
+})
+
 GENRE_LANGUAGE: dict[str, str] = {
     "ruspop": "ru", "sovpop": "ru", "chanson": "ru", "romance": "ru",
-    "frchanson": "fr", "latin": "es", "bossa": "pt", "kpop": "ko", "ghibli": "ja", "gregorian": "la",
+    "frchanson": "fr", "latin": "es", "bossa": "pt", "kpop": "ko", "ghibli": "ja", "gregorian": "la", "opera": "it",
 }
 
 MOODS: list[tuple[str, str, str]] = [
@@ -109,7 +119,7 @@ _HEAVY = ["metal", "hardrock", "punk", "grunge", "dnb", "dubstep", "trap", "edm"
 GENRE_CONFLICTS: list[tuple[str, str]] = (
     [("ambient", g) for g in _HEAVY] + [("classical", g) for g in _HEAVY] + [("lofi", g) for g in _HEAVY]
     + [("bossa", g) for g in _HEAVY]
-    + [(a, g) for a in ("neoclassical", "impressionist", "ghibli", "pastoral", "romance", "symphonic", "oldfilm", "gregorian") for g in _HEAVY] + [("acoustic", g) for g in ("dubstep", "edm", "techno", "dnb", "metal")]
+    + [(a, g) for a in ("neoclassical", "impressionist", "ghibli", "pastoral", "romance", "symphonic", "oldfilm", "gregorian", "opera", "operetta", "disney") for g in _HEAVY] + [("acoustic", g) for g in ("dubstep", "edm", "techno", "dnb", "metal")]
     + [("folk", g) for g in ("dubstep", "edm", "dnb", "metal")]
 )
 MAX_GENRES = 3

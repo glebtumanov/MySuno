@@ -930,8 +930,8 @@ function smpTile(sec, item) {
     state = "have";
     left = `<button class="smp-play" data-sact="play" title="Слушать">▶</button>`;
     const bpm = posNum(m.bpm), key = realKey(m.keyscale);
-    // язык вокала: у сэмплов, созданных до выбора языка, он русский
-    sub = esc([fmtTime(m.duration), (m.language || "ru").toUpperCase(), bpm ? `${bpm} BPM` : "", key,
+    // язык вокала (у сэмплов, созданных до выбора языка, — русский) или «без вокала»
+    sub = esc([fmtTime(m.duration), m.instrumental ? "без вокала" : (m.language || "ru").toUpperCase(), bpm ? `${bpm} BPM` : "", key,
       m.dit ? ditLabel(m.dit).replace("ACE-Step 1.5 / ", "") : ""]
       .filter(Boolean).join(" · "));
     actions = `${useBtn}<button class="btn icon" data-sact="regen" title="Сгенерировать заново (заменит этот сэмпл)">↻</button>`
