@@ -63,7 +63,7 @@ class GenerateRequest(BaseModel):
     steps: int | None = Field(None, ge=1, le=200)
     guidance: float = Field(7.0, ge=1, le=15)
     seed: int | None = None
-    batch: int = Field(1, ge=1, le=8)
+    batch: int = Field(1, ge=1, le=16)
     rank: bool = False              # выбрать лучший из `batch` вариантов по оценке качества
     keep_all: bool = False          # при rank сохранить и остальные варианты
     cot_caption: bool = True        # LM переписывает caption в «родной» для DiT вид
@@ -72,6 +72,7 @@ class GenerateRequest(BaseModel):
     lm_top_p: float | None = Field(None, gt=0, le=1)
     adg: bool | None = None
     shift: float | None = Field(None, ge=1, le=5)
+    sampler: str | None = Field(None, pattern="^(euler|heun|sde)$")   # None = euler (ODE) по умолчанию ACE
     bpm: int | None = Field(None, ge=30, le=300)
     keyscale: str = Field("", max_length=40)   # тональность («C major»); пусто — решает LM
     format: str | None = None

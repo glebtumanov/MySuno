@@ -28,7 +28,8 @@ NOISE_RATIO_LIMIT = 0.25   # доля 10-с окон с флэтностью > 0
 NOISE_FLAT_LIMIT = 0.10    # или медианная флэтность по треку
 STATIC_LIMIT = 0.60        # доля почти неизменных соседних 10-с окон = «дрон» (у нормальных треков < 0.3)
 LM_BATCH_CHUNK = 4         # элементов за проход LM при батче (с CFG = 8 строк → быстрый декодер)
-MAX_EXTRA_BATCH_CALLS = 7  # сколько раз догенерировать недостающих кандидатов (×8 порциями по 1 — 1+7)
+MAX_BATCH = 16           # кандидатов на один трек: ACE даёт ≤8 за проход, остальное догенерируем порциями
+MAX_EXTRA_BATCH_CALLS = 15  # сколько раз догенерировать недостающих кандидатов (×16 порциями по 1 — 1+15)
 LM_CFG_DEFAULT = 4.0   # ACE по умолчанию 2.0; на замерах (300 с) 2.0 → 7.18, ≥3 → 7.6–7.7: CFG LM подавляет зацикливание кодов
 
 
@@ -567,7 +568,7 @@ class AceEngine:
             t0 = time.time()
             self.ensure_loaded(settings, progress, safe=safe or self._safe_mode)
             mode = req.get("cover_mode") if req.get("cover_mode") in ("auto", "cover", "edit") else "auto"
-            batch = max(1, min(8, int(req.get("batch", 1))))
+            batch = max(1, min(MAX_BATCH, int(req.get("batch", 1))))
             und = None
             if mode in ("auto", "edit"):
                 progress(0.03, "LM слушает исходник…")
@@ -687,7 +688,7 @@ class AceEngine:
             seed = req.get("seed")
             use_random = seed is None or int(seed) < 0
             user_random = use_random
-            batch = max(1, min(8, int(req.get("batch", 1))))
+            batch = max(1, min(MAX_BATCH, int(req.get("batch", 1))))
             rank_mode = bool(req.get("rank")) and batch > 1
             # Одиночный трек: seed выбираем сами и им же сеем LM (ACE в одиночном режиме генератор LM не сеет) —
             # тогда сохранённый seed повторяет трек целиком: и коды LM, и шум диффузии.
@@ -706,6 +707,9 @@ class AceEngine:
                               ("vel_norm", "velocity_norm_threshold"), ("vel_ema", "velocity_ema_factor")):
                 if req.get(key) not in (None, ""):
                     extra[attr] = req[key]
+            # «SDE» в выборе сэмплера — это метод интегрирования, а не sampler_mode: Heun с SDE ACE не совмещает
+            if extra.get("sampler_mode") == "sde":
+                extra.update(sampler_mode="euler", infer_method="sde")
 
             if cover:
                 # Мелодию, ритм и структуру задаёт исходник; LM для cover ACE пропускает сам. Инструкцию задачи

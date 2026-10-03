@@ -390,7 +390,7 @@ function setQuality(q, fromUser = true) {
   S.quality = q;
   $$("#qualitySeg button").forEach((b) => b.classList.toggle("on", b.dataset.q === q));
   $("#qualityHint").textContent = QUALITY[q].hint;
-  $("#f-batch").value = QUALITY[q].batch;
+  setOpt("#f-batch", QUALITY[q].batch);
   if (fromUser) { try { localStorage.setItem("quality", q); } catch { /* ok */ } saveAdv(); }
 }
 
@@ -439,16 +439,16 @@ $("#lyricsFixBtn").addEventListener("click", async () => {
 /* Расширенные параметры запоминаются при каждом изменении и подставляются в новые композиции */
 const ADV_FIELDS = {
   batch: "#f-batch", seed: "#f-seed", steps: "#f-steps", guidance: "#f-guidance",
-  bpm: "#f-bpm", format: "#f-format", folder: "#f-folder",
+  bpm: "#f-bpm", format: "#f-format", sampler: "#f-sampler", folder: "#f-folder", count: "#f-count",
 };
-const ADV_CHECKS = { keep_all: "#f-keepall", thinking: "#f-thinking" };
+const ADV_CHECKS = { thinking: "#f-thinking" };
 
 function loadAdv() {
   try { return JSON.parse(localStorage.getItem("advanced") || "{}") || {}; } catch { return {}; }
 }
 function saveAdv() {
   const v = {};
-  for (const [k, sel] of Object.entries(ADV_FIELDS)) v[k] = $(sel).value;
+  for (const [k, sel] of Object.entries(ADV_FIELDS)) v[k] = $(sel + "-auto")?.checked ? "" : $(sel).value;
   for (const [k, sel] of Object.entries(ADV_CHECKS)) v[k] = $(sel).checked;
   try { localStorage.setItem("advanced", JSON.stringify(v)); } catch { /* ok */ }
 }
@@ -457,7 +457,8 @@ function restoreAdv() {
   for (const [k, sel] of Object.entries(ADV_FIELDS)) {
     if (v[k] === undefined) continue;
     if (k === "folder") S.prefFolder = v[k];   // папки ещё не загружены — применит fillFolderSelect
-    else $(sel).value = v[k];
+    else if (k === "format") setSeg(sel, v[k]);
+    else setOpt(sel, v[k]);
   }
   for (const [k, sel] of Object.entries(ADV_CHECKS)) if (v[k] !== undefined) $(sel).checked = !!v[k];
 }
@@ -487,7 +488,54 @@ function fillFolderSelect() {
   csel.value = has(ccur) ? ccur : "";
 }
 
+/* ===== расширенные параметры: ползунки с подписью значения, чекбоксы «авто», переключатели ===== */
+const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
+
+/* Поле с чекбоксом «авто» (#id-auto) недоступно, пока тот отмечен; подпись ползунка — data-val="id" */
+function syncOpt(el) {
+  const auto = $(`#${el.id}-auto`);
+  el.disabled = !!(auto && auto.checked);
+  const lbl = $(`[data-val="${el.id}"]`);
+  if (lbl) lbl.textContent = el.disabled ? "" : el.value;
+}
+/* Значение необязательного параметра: null/"" — отметить «авто» */
+function setOpt(sel, v) {
+  const el = $(sel), auto = $(sel + "-auto"), empty = v == null || v === "";
+  if (auto) auto.checked = empty;
+  if (!empty) el.value = v;
+  syncOpt(el);
+}
+/* Переключатель (data-seg="#id") над скрытым полем со значением */
+function setSeg(sel, v) {
+  $(sel).value = v ?? "";
+  $$(`[data-seg="${sel}"] button`).forEach((b) => b.classList.toggle("on", b.dataset.v === $(sel).value));
+}
+
+function initAdvControls() {
+  for (const el of $$(".adv-grid input[type=range]")) { el.addEventListener("input", () => syncOpt(el)); syncOpt(el); }
+  for (const auto of $$(".adv-head .auto input")) {
+    const el = $("#" + auto.id.replace(/-auto$/, ""));
+    auto.addEventListener("change", () => {
+      if (!auto.checked && el.value === "") el.value = randomSeed();   // seed: пустое поле → случайное число
+      syncOpt(el);
+      el.dispatchEvent(new Event("change"));   // → сохранение настроек
+    });
+    syncOpt(el);
+  }
+  for (const b of $$("[data-dice]")) b.addEventListener("click", () => {
+    setOpt(b.dataset.dice, randomSeed());
+    $(b.dataset.dice).dispatchEvent(new Event("change"));
+  });
+  for (const seg of $$("[data-seg]")) seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    setSeg(seg.dataset.seg, b.dataset.v);
+    $(seg.dataset.seg).dispatchEvent(new Event("change"));
+  });
+}
+
 const numOrNull = (id) => {
+  if ($(id + "-auto")?.checked) return null;
   const v = $(id).value.trim();
   return v === "" ? null : Number(v);
 };
@@ -499,9 +547,17 @@ async function onGenerate(e) {
   const body = { ...S.extra, ...createFormState() };   // S.extra — параметры загруженного трека, которых нет в форме
   saveAdv();   // параметры этой композиции — по умолчанию для следующих
   $("#genBtn").disabled = true;
+  // N композиций = N отдельных задач: seed пустой — у каждой свой случайный, задан — seed, seed+1, …
+  const count = Number($("#f-count").value) || 1;
   try {
-    const job = await api("/generate", { method: "POST", body });
-    msg.className = "form-msg ok"; msg.textContent = "Задача добавлена в очередь";
+    let job;
+    for (let i = 0; i < count; i++) {
+      const seed = body.seed == null ? null : (body.seed + i) % 2 ** 32;
+      job = await api("/generate", { method: "POST", body: { ...body, seed } });
+      if (count > 1) msg.textContent = `Добавлено ${i + 1} из ${count}…`;
+    }
+    msg.className = "form-msg ok";
+    msg.textContent = count > 1 ? `Добавлено задач в очередь: ${count}` : "Задача добавлена в очередь";
     if (job.warnings && job.warnings.length) {
       msg.className = "form-msg"; msg.style.color = "var(--warn)";
       msg.textContent = "Принято. Замечания: " + job.warnings.join(" · ");
@@ -532,9 +588,9 @@ function createFormState() {
     seed: numOrNull("#f-seed"),
     batch: Number($("#f-batch").value) || 1,
     rank: (Number($("#f-batch").value) || 1) > 1,
-    keep_all: $("#f-keepall").checked,
     bpm: numOrNull("#f-bpm"),
     format: $("#f-format").value || null,
+    sampler: $("#f-sampler").value || null,
     folder_id: $("#f-folder").value ? Number($("#f-folder").value) : null,
   };
 }
@@ -551,12 +607,11 @@ function applyRequestToForm(req, { show = true } = {}) {
   $("#f-thinking").checked = req.thinking !== false;
   $("#f-duration").value = req.duration || 60; $("#durLabel").textContent = fmtTime($("#f-duration").value);
   $("#f-temp").value = req.temperature ?? 0.85; $("#tempLabel").textContent = Number($("#f-temp").value).toFixed(2);
-  $("#f-steps").value = req.steps ?? ""; $("#f-guidance").value = req.guidance ?? 7;
-  $("#f-seed").value = req.seed ?? ""; $("#f-batch").value = req.batch || 1; $("#f-bpm").value = req.bpm ?? "";
-  $("#f-keepall").checked = !!req.keep_all;
+  setOpt("#f-steps", req.steps); setOpt("#f-guidance", req.guidance ?? 7);
+  setOpt("#f-seed", req.seed); setOpt("#f-batch", req.batch || 1); setOpt("#f-bpm", req.bpm);
   { const n = req.batch || 1; const m = Object.keys(QUALITY).find((k) => QUALITY[k].batch === n);
     S.quality = m || "custom"; $$("#qualitySeg button").forEach((b) => b.classList.toggle("on", b.dataset.q === m)); }
-  $("#f-format").value = req.format || "";
+  setSeg("#f-format", req.format || ""); $("#f-sampler").value = req.sampler || "";
   if (req.folder_id !== undefined) {
     S.prefFolder = req.folder_id == null ? "" : String(req.folder_id);
     fillFolderSelect();   // удалённая папка → «Без папки»
@@ -687,12 +742,21 @@ function jobsHtml() {
       </div>` : "";
     const tracks = sampleRow + (j.track_ids || []).map((id) => {
       const t = S.trackCache[id];
-      return t ? `<div class="job-track" data-track="${esc(id)}">
-        <button class="btn jt-play" data-qact="play" title="Воспроизвести">▶ ${esc(t.title)} · ${fmtTime(t.duration)}</button>
-        ${rateButtons(t)}
-        <button class="btn icon" data-qact="reuse" title="${reuseTitle(t)}">↻</button>
-        <button class="btn icon danger" data-qact="del" title="Удалить насовсем">🗑</button>
-      </div>` : "";
+      if (!t) return "";
+      const on = id === S.playingId, cur = on ? audio.currentTime : 0;
+      return `<div class="job-track${on ? " playing" : ""}" data-track="${esc(id)}">
+        <button class="playbtn" data-qact="play" title="Воспроизвести / пауза">${on && !audio.paused ? "⏸" : "▶"}</button>
+        <div class="jt-main" data-qact="play" title="Воспроизвести / пауза">
+          <span class="jt-title">${esc(t.title)}</span>
+          <span class="jt-time">${on ? `${fmtTime(cur)} / ` : ""}${fmtTime(t.duration)}</span>
+        </div>
+        <div class="jt-actions">
+          ${rateButtons(t)}
+          <button class="btn icon" data-qact="reuse" title="${reuseTitle(t)}">↻</button>
+          <button class="btn icon danger" data-qact="del" title="Удалить насовсем">🗑</button>
+        </div>
+        <div class="jt-seek" title="Перемотать"><i style="width:${on && t.duration ? (cur / t.duration) * 100 : 0}%"></i></div>
+      </div>`;
     }).join("");
     // готовые задачи убираются дизлайком/удалением треков; кнопка остаётся только у задач без результата
     const stoppable = j.status === "running" && j.kind === "generate";
@@ -761,8 +825,15 @@ $$(".job-list").forEach((list) => list.addEventListener("click", async (e) => {
   if (btn) {
     const t = S.trackCache[btn.closest("[data-track]").dataset.track];
     if (!t) return;
-    if (btn.dataset.qact === "play") playTrack(t, [t]);
-    else trackAction(btn.dataset.qact, t);
+    if (btn.dataset.qact !== "play") trackAction(btn.dataset.qact, t);
+    else if (S.playingId === t.id && audio.src) audio.paused ? audio.play() : audio.pause();
+    else playTrack(t, queueTracks(), "jobs");
+    return;
+  }
+  const seek = e.target.closest(".job-track.playing .jt-seek");
+  if (seek && audio.duration) {
+    const r = seek.getBoundingClientRect();
+    audio.currentTime = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * audio.duration;
     return;
   }
   const d = e.target.closest("[data-dismiss]");
@@ -825,7 +896,14 @@ function renderEngineBadge() {
 const audio = $("#audio");
 let seeking = false;
 
-function playTrack(track, list) {
+/* Готовые треки очереди в порядке показа — её плейлист (сэмплы библиотеки играют своим списком) */
+function queueTracks() {
+  return S.jobs.flatMap((j) => (j.track_ids || []).map((id) => S.trackCache[id]).filter((t) => t && t.rating !== -1));
+}
+
+/* src = "jobs": играем очередь — её список пересобирается на каждом переходе (треки появляются и удаляются) */
+function playTrack(track, list, src = null) {
+  S.queueSrc = src;
   S.queue = list && list.length ? list : [track];
   S.queueIdx = S.queue.findIndex((t) => t.id === track.id);
   S.playingId = track.id;
@@ -835,21 +913,35 @@ function playTrack(track, list) {
   markPlaying();
 }
 function markPlaying() {
-  $$(".track, .smp.have").forEach((r) => {
-    const on = (r.dataset.pid || r.dataset.id) === S.playingId;
+  $$(".track, .smp.have, .job-track[data-track]").forEach((r) => {
+    const on = (r.dataset.pid || r.dataset.id || r.dataset.track) === S.playingId;
     r.classList.toggle("playing", on);
     const b = $(".playbtn, .smp-play", r);
     if (b) b.textContent = on && !audio.paused ? "⏸" : "▶";
   });
+  $$("[data-qp=play]").forEach((b) => (b.textContent = S.queueSrc === "jobs" && !audio.paused ? "⏸" : "▶"));
 }
 function step(delta) {
+  if (S.queueSrc === "jobs") {
+    S.queue = queueTracks();
+    const k = S.queue.findIndex((t) => t.id === S.playingId);
+    if (k >= 0) S.queueIdx = k;
+  }
   if (!S.queue.length) return;
   const i = S.queueIdx + delta;
-  if (i >= 0 && i < S.queue.length) playTrack(S.queue[i], S.queue);
+  if (i >= 0 && i < S.queue.length) playTrack(S.queue[i], S.queue, S.queueSrc);
 }
 $("#pPlay").addEventListener("click", () => { if (audio.src) audio.paused ? audio.play() : audio.pause(); });
 $("#pPrev").addEventListener("click", () => step(-1));
 $("#pNext").addEventListener("click", () => step(1));
+/* Кнопки в шапке очереди: пока играет не очередь — любая запускает её с первого трека */
+$$("[data-qp]").forEach((b) => b.addEventListener("click", () => {
+  if (S.queueSrc !== "jobs" || !audio.src) {
+    const list = queueTracks();
+    if (list.length) playTrack(list[0], list, "jobs");
+  } else if (b.dataset.qp === "play") audio.paused ? audio.play() : audio.pause();
+  else step(b.dataset.qp === "next" ? 1 : -1);
+}));
 audio.addEventListener("play", () => { $("#pPlay").textContent = "⏸"; markPlaying(); coverPrev.pause(); srcPrev.pause(); });
 audio.addEventListener("pause", () => { $("#pPlay").textContent = "▶"; markPlaying(); });
 audio.addEventListener("ended", () => {
@@ -861,6 +953,10 @@ audio.addEventListener("loadedmetadata", () => ($("#pDur").textContent = fmtTime
 audio.addEventListener("timeupdate", () => {
   $("#pCur").textContent = fmtTime(audio.currentTime);
   if (!seeking && audio.duration) $("#pSeek").value = Math.round((audio.currentTime / audio.duration) * 1000);
+  if (audio.duration) $$(".job-track.playing").forEach((r) => {
+    $(".jt-seek > i", r).style.width = `${(audio.currentTime / audio.duration) * 100}%`;
+    $(".jt-time", r).textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(audio.duration)}`;
+  });
 });
 $("#pSeek").addEventListener("input", () => { seeking = true; });
 $("#pSeek").addEventListener("change", () => {
@@ -1353,7 +1449,7 @@ function setCoverQuality(q, fromUser = true) {
   C.quality = q;
   $$("#c-qualitySeg button").forEach((b) => b.classList.toggle("on", b.dataset.q === q));
   $("#c-qualityHint").textContent = coverQualityHint(q);
-  $("#c-batch").value = QUALITY[q].batch;
+  setOpt("#c-batch", QUALITY[q].batch);
   if (fromUser) saveCoverPrefs();
 }
 
@@ -1367,7 +1463,7 @@ function setStrength(v, fromUser = true) {
 
 function saveCoverPrefs() {
   const v = { mode: C.mode, quality: C.quality, strength: Number($("#c-strength").value), noise: Number($("#c-noise").value),
-    folder: $("#c-folder").value, format: $("#c-format").value, keep_all: $("#c-keepall").checked };
+    folder: $("#c-folder").value, format: $("#c-format").value, sampler: $("#c-sampler").value };
   try { localStorage.setItem("coverPrefs", JSON.stringify(v)); } catch { /* ok */ }
 }
 
@@ -1389,7 +1485,7 @@ function initCover() {
   $("#c-strengthSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setStrength(b.dataset.v); });
   $("#c-strength").addEventListener("input", () => setStrength($("#c-strength").value));
   $("#c-noise").addEventListener("input", () => { $("#c-noiseLabel").textContent = Number($("#c-noise").value).toFixed(2); saveCoverPrefs(); });
-  for (const id of ["#c-folder", "#c-format", "#c-keepall"]) $(id).addEventListener("change", () => {
+  for (const id of ["#c-folder", "#c-format", "#c-sampler"]) $(id).addEventListener("change", () => {
     if (id === "#c-folder") C.prefFolder = $(id).value;
     saveCoverPrefs();
   });
@@ -1403,8 +1499,8 @@ function initCover() {
   setStrength(prefs.strength ?? 0.6, false);
   $("#c-noise").value = prefs.noise ?? 0; $("#c-noiseLabel").textContent = Number($("#c-noise").value).toFixed(2);
   if (prefs.folder !== undefined) C.prefFolder = prefs.folder;
-  if (prefs.format !== undefined) $("#c-format").value = prefs.format;
-  $("#c-keepall").checked = !!prefs.keep_all;
+  if (prefs.format !== undefined) setSeg("#c-format", prefs.format);
+  if (prefs.sampler !== undefined) $("#c-sampler").value = prefs.sampler;
   syncCoverChips();
 
   initSourcePanel();
@@ -1937,10 +2033,11 @@ function coverFormState() {
     cover_mode: C.mode,
     cover_strength: Number($("#c-strength").value),
     cover_noise: Number($("#c-noise").value),
-    batch, rank: batch > 1, keep_all: $("#c-keepall").checked,
+    batch, rank: batch > 1,
     seed: numOrNull("#c-seed"), steps: numOrNull("#c-steps"),
     guidance: Number($("#c-guidance").value) || 7,
     format: $("#c-format").value || null,
+    sampler: $("#c-sampler").value || null,
     folder_id: $("#c-folder").value ? Number($("#c-folder").value) : null,
   };
 }
@@ -1956,10 +2053,9 @@ async function applyRequestToCover(req, { show = true, quiet = false } = {}) {
   setStrength(req.cover_strength ?? 0.6, false);
   setCoverMode(req.cover_mode || "cover", false);   // старые каверы (до выбора способа) делались «по нотам»
   $("#c-noise").value = req.cover_noise || 0; $("#c-noiseLabel").textContent = Number($("#c-noise").value).toFixed(2);
-  $("#c-batch").value = req.batch || 1; $("#c-batch").dispatchEvent(new Event("input"));
-  $("#c-seed").value = req.seed ?? ""; $("#c-steps").value = req.steps ?? ""; $("#c-guidance").value = req.guidance ?? 7;
-  $("#c-keepall").checked = !!req.keep_all;
-  $("#c-format").value = req.format || "";
+  setOpt("#c-batch", req.batch || 1); $("#c-batch").dispatchEvent(new Event("input"));
+  setOpt("#c-seed", req.seed); setOpt("#c-steps", req.steps); setOpt("#c-guidance", req.guidance ?? 7);
+  setSeg("#c-format", req.format || ""); $("#c-sampler").value = req.sampler || "";
   if (req.folder_id !== undefined) {
     C.prefFolder = req.folder_id == null ? "" : String(req.folder_id);
     fillFolderSelect();
@@ -2083,6 +2179,7 @@ $("#unloadBtn").addEventListener("click", async () => {
 /* ===================== старт ===================== */
 (async function init() {
   [S.presets, S.settings] = await Promise.all([api("/presets"), api("/settings")]);
+  initAdvControls();
   initCreate();
   initCover();
   initFolds();

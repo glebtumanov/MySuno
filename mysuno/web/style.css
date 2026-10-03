@@ -115,6 +115,19 @@ details:not([open]) > summary::before { transform: none; }
 .adv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 10px; }
 .adv-grid label { font-size: 13px; font-weight: 600; display: block; }
 .adv-grid input, .adv-grid select { margin-top: 4px; font-weight: 400; }
+.adv-grid input:disabled { opacity: .4; cursor: not-allowed; }
+.adv-head { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; min-height: 20px; }
+.adv-head em { font-weight: 400; }
+.adv-head .auto {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11.5px; font-weight: 400; color: var(--muted); cursor: pointer; user-select: none;
+}
+.adv-head .auto input { margin: 0; width: 12px; height: 12px; }
+.adv-grid .segmented { margin-top: 4px; }
+.segmented.sm button { padding: 6px 8px; font-size: 13px; }
+.seed-row { display: flex; gap: 6px; margin-top: 4px; }
+.adv-grid .seed-row input { margin-top: 0; min-width: 0; }
+.btn.dice { display: inline-flex; align-items: center; justify-content: center; padding: 0 9px; }
 
 /* ---------- чипы / сегменты ---------- */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -146,6 +159,8 @@ details:not([open]) > summary::before { transform: none; }
 .btn.icon { padding: 6px 10px; min-width: 38px; }
 .btn.danger:hover { border-color: var(--bad); color: var(--bad); }
 .form-actions { display: flex; align-items: center; gap: 14px; margin-top: 8px; flex-wrap: wrap; }
+.gen-count { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; }
+.gen-count select { width: auto; padding: 8px 10px; }
 .form-msg { color: var(--muted); font-size: 13.5px; }
 .form-msg.err { color: var(--bad); }
 .form-msg.ok { color: var(--good); }
@@ -166,6 +181,27 @@ details:not([open]) > summary::before { transform: none; }
 .job-actions { margin-top: 8px; display: flex; gap: 8px; }
 .job-track { display: flex; gap: 6px; align-items: center; min-width: 0; }
 .job-track .btn.icon { flex: 0 0 auto; }
+/* трек очереди: ▶ | название и время | действия; под ними — полоса прогресса играющего трека */
+.job-track[data-track] {
+  display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 4px 8px;
+  padding: 6px; margin: 0 -6px; border-radius: 8px; border: 1px solid transparent;
+}
+.job-track[data-track]:hover { background: var(--panel); }
+.job-track.playing { border-color: var(--accent); background: var(--panel); }
+.job-track .playbtn {
+  width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--accent); color: #fff;
+  font-size: 13px; cursor: pointer;
+}
+.jt-main { display: flex; flex-direction: column; min-width: 0; cursor: pointer; }
+.jt-title { font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jt-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.jt-actions { display: flex; gap: 4px; }
+.jt-seek { grid-column: 1 / -1; height: 5px; border-radius: 3px; background: var(--line); cursor: pointer; display: none; }
+.jt-seek > i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.job-track.playing .jt-seek { display: block; }
+.queue-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.queue-head h2 { margin: 0; flex: 1; }
+.q-ctl { display: flex; gap: 4px; }
 .job-track .jt-play { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn.rate { filter: grayscale(1); opacity: .65; }
 .btn.rate:hover { filter: none; opacity: 1; }

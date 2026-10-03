@@ -29,9 +29,9 @@
           <h2>Текст песни</h2>
           <em>русский; разделы [verse], [chorus], [bridge]</em>
         </div>
-        <textarea id="f-lyrics" maxlength="4096" spellcheck="false"
+        <textarea id="f-lyrics" maxlength="4096" spellcheck="false" title="Текст для вокала. Разделы помечайте тегами [verse], [chorus], [bridge] — «Подготовить текст» расставит их сам"
           placeholder="[verse]&#10;Дождь стучит по крыше…&#10;&#10;[chorus]&#10;…"></textarea>
-        <label class="check">
+        <label class="check" title="Если поле текста пустое, языковая модель сочинит текст сама. Свой текст обычно получается лучше">
           <input type="checkbox" id="f-autolyrics" checked>
           Если текста нет — придумать автоматически (LM)
         </label>
@@ -53,12 +53,12 @@
 
         <label class="field">
           <span>Название <em>(необязательно)</em></span>
-          <input type="text" id="f-title" maxlength="120" placeholder="Осенний дождь">
+          <input type="text" id="f-title" maxlength="120" title="Название трека в архиве. Пусто — название составится из жанров" placeholder="Осенний дождь">
         </label>
 
         <div class="field">
           <span>Описание музыки и жанры</span>
-          <textarea id="f-prompt" rows="3" maxlength="2000"
+          <textarea id="f-prompt" rows="3" maxlength="2000" title="Свободное описание: инструменты, настроение, темп, тема. +Жанр — добавить жанр (с подсказками), -Жанр — исключить"
             placeholder="Например: +Jazz грустная лирическая песня про осенний дождь, фортепиано и струнные&#10;+ — добавить жанр, - — исключить жанр"></textarea>
           <div class="genre-line" id="f-genreLine"></div>
           <p class="hint" id="f-negHint" hidden>⚠ Исключение жанров экспериментально: жанр передаётся LM как «негативный промпт»,
@@ -69,83 +69,113 @@
           <button type="button" class="fold-head" aria-expanded="true">
             <span class="sp-chev"></span><b>Настроение</b><span class="fold-sum" id="moodSum"></span>
           </button>
-          <div class="fold-body"><div class="chips" id="moodChips"></div></div>
+          <div class="fold-body"><div class="chips" id="moodChips" title="Настроения добавляются к описанию; можно выбрать несколько"></div></div>
         </div>
 
         <div class="tag-warn" id="tagWarn" hidden></div>
 
         <div class="field">
           <span>Вокал</span>
-          <div class="segmented" id="vocalSeg"></div>
+          <div class="segmented" id="vocalSeg" title="Кто поёт. «Без вокала» — инструментал, текст не используется"></div>
         </div>
 
         <div class="field">
           <span>Качество</span>
           <div class="segmented" id="qualitySeg">
-            <button type="button" data-q="fast">Быстро</button>
-            <button type="button" data-q="good">Хорошо <em>×4</em></button>
-            <button type="button" data-q="max">Максимум <em>×8</em></button>
+            <button type="button" data-q="fast" title="Один вариант без выбора лучшего. Если выйдет шум или статичный гул — движок сам перегенерирует">Быстро</button>
+            <button type="button" data-q="good" title="4 варианта, лучший выбирается автоматически">Хорошо <em>×4</em></button>
+            <button type="button" data-q="max" title="8 вариантов, лучший выбирается автоматически. Дольше всего">Максимум <em>×8</em></button>
           </div>
           <p class="hint" id="qualityHint"></p>
         </div>
 
         <div class="field">
           <span>Длительность: <b id="durLabel">1:00</b></span>
-          <input type="range" id="f-duration" min="10" max="300" step="5" value="60">
+          <input type="range" id="f-duration" title="Длина трека" min="10" max="300" step="5" value="60">
         </div>
 
         <div class="field">
           <span>Температура (креативность LM): <b id="tempLabel">0.85</b></span>
-          <input type="range" id="f-temp" min="0" max="2" step="0.05" value="0.85">
+          <input type="range" id="f-temp" title="Температура языковой модели: ниже — предсказуемее и ровнее, выше — неожиданнее, но чаще сбои" min="0" max="2" step="0.05" value="0.85">
           <p class="hint">Выше — разнообразнее и рискованнее. Действует при включённом LM-планировщике.</p>
         </div>
 
         <details class="field adv">
           <summary>Расширенные параметры</summary>
           <div class="adv-grid">
-            <label>Вариантов
-              <input type="number" id="f-batch" min="1" max="8" value="1">
-            </label>
-            <label class="check inline">
-              <input type="checkbox" id="f-keepall"> Сохранять все варианты
-            </label>
-            <label>Seed <em>(пусто = случайный)</em>
-              <input type="number" id="f-seed" placeholder="случайный">
-            </label>
-            <label>Шаги <em>(пусто = авто)</em>
-              <input type="number" id="f-steps" min="1" max="200" placeholder="авто">
-            </label>
-            <label>Guidance <em>(sft/base)</em>
-              <input type="number" id="f-guidance" min="1" max="15" step="0.5" value="7">
-            </label>
-            <label>BPM <em>(пусто = авто)</em>
-              <input type="number" id="f-bpm" min="30" max="300" placeholder="авто">
-            </label>
-            <label>Формат
-              <select id="f-format">
-                <option value="">по умолчанию</option>
-                <option value="flac">FLAC</option>
-                <option value="mp3">MP3</option>
-                <option value="wav">WAV</option>
+            <div class="adv-item" title="Сколько вариантов сгенерировать, чтобы выбрать лучший: оценивается качество звука, соответствие описанию и разборчивость текста. Сохраняется только лучший. ACE делает до 8 за проход, остальные догенерируются порциями — дольше">
+              <div class="adv-head">Вариантов: <b data-val="f-batch"></b></div>
+              <input type="range" id="f-batch" min="1" max="16" step="1" value="1" list="batch-ticks">
+              <datalist id="batch-ticks"><option value="1"></option><option value="4"></option><option value="8"></option><option value="12"></option><option value="16"></option></datalist>
+            </div>
+            <div class="adv-item" title="Число шагов диффузии. Авто: turbo — 8, sft/base — 50 (перекраска в каверах — 60). Turbo обучен на 8 шагов, больше ему обычно не помогает">
+              <div class="adv-head">Шаги: <b data-val="f-steps"></b>
+                <label class="auto" title="Число шагов по модели: turbo — 8, sft/base — 50"><input type="checkbox" id="f-steps-auto" checked> авто</label></div>
+              <input type="range" id="f-steps" min="1" max="200" step="1" value="8" list="steps-ticks">
+              <datalist id="steps-ticks"><option value="1"></option><option value="50"></option><option value="100"></option><option value="150"></option><option value="200"></option></datalist>
+            </div>
+            <div class="adv-item" title="Насколько строго диффузия следует описанию (CFG). Действует только на моделях sft/base — turbo его игнорирует. Выше — точнее по описанию, но звук может стать жёстче">
+              <div class="adv-head">Guidance <em>(sft/base)</em>: <b data-val="f-guidance"></b></div>
+              <input type="range" id="f-guidance" min="1" max="15" step="0.5" value="7">
+            </div>
+            <div class="adv-item" title="Темп в ударах в минуту">
+              <div class="adv-head">BPM: <b data-val="f-bpm"></b>
+                <label class="auto" title="Темп подберёт LM-планировщик по описанию"><input type="checkbox" id="f-bpm-auto" checked> авто</label></div>
+              <input type="range" id="f-bpm" min="30" max="300" step="1" value="120">
+            </div>
+            <div class="adv-item" title="Число, от которого зависит случайность генерации. Тот же seed + те же параметры при одном варианте дают тот же трек">
+              <div class="adv-head">Seed
+                <label class="auto" title="Каждый раз новый случайный seed"><input type="checkbox" id="f-seed-auto" checked> случайный</label></div>
+              <div class="seed-row">
+                <input type="number" id="f-seed" min="0" max="4294967295">
+                <button type="button" class="btn icon dice" data-dice="#f-seed" title="Подставить случайный seed — его видно, и трек можно будет повторить"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><g fill="currentColor"><circle cx="8.5" cy="8.5" r="1.6"/><circle cx="15.5" cy="8.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="8.5" cy="15.5" r="1.6"/><circle cx="15.5" cy="15.5" r="1.6"/></g></svg></button>
+              </div>
+            </div>
+            <label title="Как диффузия проходит шаги. Euler — стандартный. Heun — точнее на каждом шаге, но вдвое дольше. SDE — на каждом шаге добавляет свежий шум: разнообразнее, но может быть грязнее">Сэмплер
+              <select id="f-sampler">
+                <option value="">Euler (по умолчанию)</option>
+                <option value="heun">Heun — точнее, ×2 по времени</option>
+                <option value="sde">SDE — стохастический</option>
               </select>
             </label>
-            <label>Сохранить в папку
+            <div class="adv-item span-2" title="Формат аудиофайла">
+              <div class="adv-head">Формат</div>
+              <input type="hidden" id="f-format" value="">
+              <div class="segmented sm" data-seg="#f-format">
+                <button type="button" data-v="" class="on" title="Формат из настроек движка">По умолчанию</button><button type="button" data-v="flac" title="Без потерь, файл крупнее MP3 в 4–6 раз">FLAC</button><button type="button" data-v="mp3" title="Компактный, со сжатием с потерями">MP3</button><button type="button" data-v="wav" title="Без сжатия, самый большой файл">WAV</button>
+              </div>
+            </div>
+            <label title="Папка архива, куда попадёт готовый трек">Сохранить в папку
               <select id="f-folder"><option value="">Без папки</option></select>
             </label>
-            <label class="check inline">
+            <label class="check inline" title="Перед диффузией языковая модель уточняет описание, подбирает темп, тональность и структуру и задаёт «план» звучания. Без неё быстрее, но обычно заметно хуже">
               <input type="checkbox" id="f-thinking" checked> LM-планирование
             </label>
           </div>
         </details>
 
         <div class="form-actions">
-          <button type="submit" class="btn primary big" id="genBtn">Сгенерировать</button>
+          <button type="submit" class="btn primary big" id="genBtn" title="Поставить композицию в очередь генерации">Сгенерировать</button>
+          <label class="gen-count" title="Сколько разных композиций создать: каждая — отдельная задача со своим seed">
+            Композиций
+            <select id="f-count">
+              <option>1</option><option>2</option><option>3</option><option>4</option>
+              <option>5</option><option>6</option><option>8</option><option>10</option>
+            </select>
+          </label>
           <span class="form-msg" id="formMsg"></span>
         </div>
       </form>
 
       <div class="card queue-card">
-        <h2>Очередь</h2>
+        <div class="queue-head">
+          <h2>Очередь</h2>
+          <div class="q-ctl">
+            <button type="button" class="btn icon" data-qp="prev" title="Предыдущий трек очереди">⏮</button>
+            <button type="button" class="btn icon play" data-qp="play" title="Слушать очередь подряд / пауза">▶</button>
+            <button type="button" class="btn icon" data-qp="next" title="Следующий трек очереди">⏭</button>
+          </div>
+        </div>
         <div id="jobList" class="job-list"><p class="muted">Пока пусто. Заполните форму и нажмите «Сгенерировать».</p></div>
       </div>
     </div>
@@ -159,7 +189,7 @@
           <h2>Текст кавера</h2>
           <em>пусто — инструментал</em>
         </div>
-        <textarea id="c-lyrics" maxlength="4096" spellcheck="false"
+        <textarea id="c-lyrics" maxlength="4096" spellcheck="false" title="Новый текст на мелодию исходника. Пусто — инструментальная версия"
           placeholder="[verse]&#10;Новый текст на мелодию оригинала…&#10;&#10;[chorus]&#10;…&#10;&#10;Оставьте поле пустым — получится инструментальная версия."></textarea>
         <div class="lyrics-tools">
           <button type="button" class="btn" id="c-lyricsFix" title="Русские теги секций → английские, пустые строки, автоматическая разметка">Подготовить текст</button>
@@ -224,10 +254,10 @@
               <div class="wave-msg" id="c-waveMsg"></div>
             </div>
             <div class="sel-row">
-              <label>Начало <input type="text" id="c-start" inputmode="decimal" value="0:00"></label>
-              <label>Конец <input type="text" id="c-end" inputmode="decimal" value="0:00"></label>
+              <label title="Начало фрагмента: секунды или м:сс">Начало <input type="text" id="c-start" inputmode="decimal" value="0:00"></label>
+              <label title="Конец фрагмента: секунды или м:сс">Конец <input type="text" id="c-end" inputmode="decimal" value="0:00"></label>
               <span class="sel-len" id="c-selLen"></span>
-              <button type="button" class="btn" id="c-selAll">Весь трек</button>
+              <button type="button" class="btn" id="c-selAll" title="Взять исходник целиком">Весь трек</button>
             </div>
             <p class="hint">Потяните мышью по волне, чтобы выбрать фрагмент; края можно перетаскивать. Длина кавера = длине фрагмента.</p>
           </div>
@@ -235,12 +265,12 @@
 
         <label class="field">
           <span>Название <em>(необязательно)</em></span>
-          <input type="text" id="c-title" maxlength="120" placeholder="Кавер: …">
+          <input type="text" id="c-title" maxlength="120" title="Название кавера в архиве. Пусто — «Кавер: » + название исходника" placeholder="Кавер: …">
         </label>
 
         <div class="field">
           <span>Новый стиль и жанры</span>
-          <textarea id="c-prompt" rows="2" maxlength="2000"
+          <textarea id="c-prompt" rows="2" maxlength="2000" title="Каким должен стать кавер: жанры, инструменты, манера. +Жанр — добавить жанр (с подсказками)"
             placeholder="Например: +Jazz саксофон, контрабас, щётки по барабанам&#10;+ — добавить жанр"></textarea>
           <div class="genre-line" id="c-genreLine"></div>
         </div>
@@ -249,23 +279,23 @@
           <button type="button" class="fold-head" aria-expanded="true">
             <span class="sp-chev"></span><b>Настроение</b><span class="fold-sum" id="c-moodSum"></span>
           </button>
-          <div class="fold-body"><div class="chips" id="c-moodChips"></div></div>
+          <div class="fold-body"><div class="chips" id="c-moodChips" title="Настроения добавляются к описанию; можно выбрать несколько"></div></div>
         </div>
 
         <div class="tag-warn" id="c-tagWarn" hidden></div>
 
         <div class="field">
           <span>Вокал</span>
-          <div class="segmented" id="c-vocalSeg"></div>
+          <div class="segmented" id="c-vocalSeg" title="Кто поёт в кавере. Без текста кавер будет инструментальным"></div>
           <p class="hint" id="c-vocalHint"></p>
         </div>
 
         <div class="field">
           <span>Способ</span>
           <div class="segmented" id="c-modeSeg">
-            <button type="button" data-mode="auto">Авто <em>рекомендуется</em></button>
-            <button type="button" data-mode="cover">По нотам</button>
-            <button type="button" data-mode="edit">Перекраска</button>
+            <button type="button" data-mode="auto" title="Часть вариантов «По нотам», часть «Перекраской» — лучший выбирается по оценке">Авто <em>рекомендуется</em></button>
+            <button type="button" data-mode="cover" title="Модель получает ноты и ритм исходника и играет их в новом стиле. Уверенно меняет стиль у треков, созданных этой моделью; на сложных живых записях может получиться каша">По нотам</button>
+            <button type="button" data-mode="edit" title="Исходник плавно «перекрашивается» из своего описания в целевое. Чистый звук и узнаваемая гармония на живых записях, но стиль меняется слабее. Нужна LM">Перекраска</button>
           </div>
           <p class="hint" id="c-modeHint"></p>
         </div>
@@ -273,11 +303,11 @@
         <div class="field">
           <span>Близость к оригиналу: <b id="c-strengthLabel">0.60</b></span>
           <div class="segmented" id="c-strengthSeg">
-            <button type="button" data-v="0.4">Свободно</button>
-            <button type="button" data-v="0.6">Баланс</button>
-            <button type="button" data-v="0.85">Близко</button>
+            <button type="button" data-v="0.4" title="От исходника остаются мелодия и структура — для радикальной смены жанра">Свободно</button>
+            <button type="button" data-v="0.6" title="Золотая середина между исходником и новым стилем">Баланс</button>
+            <button type="button" data-v="0.85" title="Лёгкая перестилизация: результат держится за оригинал">Близко</button>
           </div>
-          <input type="range" id="c-strength" min="0.05" max="1" step="0.05" value="0.6">
+          <input type="range" id="c-strength" title="Насколько результат держится за исходник" min="0.05" max="1" step="0.05" value="0.6">
           <p class="hint">Насколько результат держится за исходник. Радикальная смена жанра — «Свободно»;
             лёгкая перестилизация — «Близко».</p>
         </div>
@@ -285,9 +315,9 @@
         <div class="field">
           <span>Качество</span>
           <div class="segmented" id="c-qualitySeg">
-            <button type="button" data-q="fast">Быстро</button>
-            <button type="button" data-q="good">Хорошо <em>×4</em></button>
-            <button type="button" data-q="max">Максимум <em>×8</em></button>
+            <button type="button" data-q="fast" title="Один вариант без выбора лучшего. Если выйдет шум или статичный гул — движок сам перегенерирует">Быстро</button>
+            <button type="button" data-q="good" title="4 варианта, лучший выбирается автоматически">Хорошо <em>×4</em></button>
+            <button type="button" data-q="max" title="8 вариантов, лучший выбирается автоматически. Дольше всего">Максимум <em>×8</em></button>
           </div>
           <p class="hint" id="c-qualityHint"></p>
         </div>
@@ -295,47 +325,66 @@
         <details class="field adv">
           <summary>Расширенные параметры</summary>
           <div class="adv-grid">
-            <label class="span-2">Сохранить звучание оригинала <em>(только «По нотам»)</em>: <b id="c-noiseLabel">0</b>
+            <label class="span-2" title="Только для способа «По нотам». 0 — звук создаётся с нуля; выше — генерация стартует с зашумлённого оригинала: тембр и сведение ближе к исходнику, но стиль меняется слабее">Сохранить звучание оригинала <em>(только «По нотам»)</em>: <b id="c-noiseLabel">0</b>
               <input type="range" id="c-noise" min="0" max="0.9" step="0.05" value="0">
               <em>0 — звук создаётся заново; выше — генерация стартует с «зашумлённого» оригинала: ближе тембр и микс, но меньше смены стиля</em>
             </label>
-            <label>Вариантов
-              <input type="number" id="c-batch" min="1" max="8" value="1">
-            </label>
-            <label class="check inline">
-              <input type="checkbox" id="c-keepall"> Сохранять все варианты
-            </label>
-            <label>Seed <em>(пусто = случайный)</em>
-              <input type="number" id="c-seed" placeholder="случайный">
-            </label>
-            <label>Шаги <em>(пусто = авто)</em>
-              <input type="number" id="c-steps" min="1" max="200" placeholder="авто">
-            </label>
-            <label>Guidance <em>(sft/base)</em>
-              <input type="number" id="c-guidance" min="1" max="15" step="0.5" value="7">
-            </label>
-            <label>Формат
-              <select id="c-format">
-                <option value="">по умолчанию</option>
-                <option value="flac">FLAC</option>
-                <option value="mp3">MP3</option>
-                <option value="wav">WAV</option>
+            <div class="adv-item" title="Сколько вариантов сгенерировать, чтобы выбрать лучший: оценивается качество звука, соответствие описанию, узнаваемость оригинала и разборчивость текста. Сохраняется только лучший. При способе «Авто» варианты делятся между «По нотам» и «Перекраской»">
+              <div class="adv-head">Вариантов: <b data-val="c-batch"></b></div>
+              <input type="range" id="c-batch" min="1" max="16" step="1" value="1" list="batch-ticks">
+            </div>
+            <div class="adv-item" title="Число шагов диффузии. Авто: turbo — 8, sft/base — 50, перекраска — 60. Turbo обучен на 8 шагов, больше ему обычно не помогает">
+              <div class="adv-head">Шаги: <b data-val="c-steps"></b>
+                <label class="auto" title="Число шагов по модели и способу"><input type="checkbox" id="c-steps-auto" checked> авто</label></div>
+              <input type="range" id="c-steps" min="1" max="200" step="1" value="8" list="steps-ticks">
+            </div>
+            <div class="adv-item" title="Насколько строго диффузия следует описанию (CFG). Действует только на моделях sft/base — turbo его игнорирует">
+              <div class="adv-head">Guidance <em>(sft/base)</em>: <b data-val="c-guidance"></b></div>
+              <input type="range" id="c-guidance" min="1" max="15" step="0.5" value="7">
+            </div>
+            <div class="adv-item" title="Число, от которого зависит случайность генерации. Тот же seed + те же параметры дают тот же результат">
+              <div class="adv-head">Seed
+                <label class="auto" title="Каждый раз новый случайный seed"><input type="checkbox" id="c-seed-auto" checked> случайный</label></div>
+              <div class="seed-row">
+                <input type="number" id="c-seed" min="0" max="4294967295">
+                <button type="button" class="btn icon dice" data-dice="#c-seed" title="Подставить случайный seed — его видно, и кавер можно будет повторить"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><g fill="currentColor"><circle cx="8.5" cy="8.5" r="1.6"/><circle cx="15.5" cy="8.5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="8.5" cy="15.5" r="1.6"/><circle cx="15.5" cy="15.5" r="1.6"/></g></svg></button>
+              </div>
+            </div>
+            <div class="adv-item span-2" title="Формат аудиофайла">
+              <div class="adv-head">Формат</div>
+              <input type="hidden" id="c-format" value="">
+              <div class="segmented sm" data-seg="#c-format">
+                <button type="button" data-v="" class="on" title="Формат из настроек движка">По умолчанию</button><button type="button" data-v="flac" title="Без потерь, файл крупнее MP3 в 4–6 раз">FLAC</button><button type="button" data-v="mp3" title="Компактный, со сжатием с потерями">MP3</button><button type="button" data-v="wav" title="Без сжатия, самый большой файл">WAV</button>
+              </div>
+            </div>
+            <label title="Как диффузия проходит шаги. Euler — стандартный. Heun — точнее на каждом шаге, но вдвое дольше (в «Перекраске» не действует). SDE — на каждом шаге добавляет свежий шум: разнообразнее, но может быть грязнее">Сэмплер
+              <select id="c-sampler">
+                <option value="">Euler (по умолчанию)</option>
+                <option value="heun">Heun — точнее, ×2 по времени</option>
+                <option value="sde">SDE — стохастический</option>
               </select>
             </label>
-            <label>Сохранить в папку
+            <label title="Папка архива, куда попадёт готовый кавер">Сохранить в папку
               <select id="c-folder"><option value="">Без папки</option></select>
             </label>
           </div>
         </details>
 
         <div class="form-actions">
-          <button type="submit" class="btn primary big" id="c-genBtn">Создать кавер</button>
+          <button type="submit" class="btn primary big" id="c-genBtn" title="Поставить кавер в очередь генерации">Создать кавер</button>
           <span class="form-msg" id="c-formMsg"></span>
         </div>
       </form>
 
       <div class="card queue-card">
-        <h2>Очередь</h2>
+        <div class="queue-head">
+          <h2>Очередь</h2>
+          <div class="q-ctl">
+            <button type="button" class="btn icon" data-qp="prev" title="Предыдущий трек очереди">⏮</button>
+            <button type="button" class="btn icon play" data-qp="play" title="Слушать очередь подряд / пауза">▶</button>
+            <button type="button" class="btn icon" data-qp="next" title="Следующий трек очереди">⏭</button>
+          </div>
+        </div>
         <div class="job-list"><p class="muted">Пока пусто.</p></div>
       </div>
     </div>
@@ -364,7 +413,14 @@
         <div id="smpSections"></div>
       </div>
       <div class="card queue-card">
-        <h2>Очередь</h2>
+        <div class="queue-head">
+          <h2>Очередь</h2>
+          <div class="q-ctl">
+            <button type="button" class="btn icon" data-qp="prev" title="Предыдущий трек очереди">⏮</button>
+            <button type="button" class="btn icon play" data-qp="play" title="Слушать очередь подряд / пауза">▶</button>
+            <button type="button" class="btn icon" data-qp="next" title="Следующий трек очереди">⏭</button>
+          </div>
+        </div>
         <div class="job-list"><p class="muted">Пока пусто.</p></div>
       </div>
     </div>
@@ -413,46 +469,46 @@
 
       <form class="card" id="settingsForm">
         <h2>Параметры движка</h2>
-        <label class="field"><span>Устройство</span>
+        <label class="field" title="На чём считать модели. Авто — видеокарта, если есть CUDA"><span>Устройство</span>
           <select id="s-device">
             <option value="auto">Авто (GPU если есть)</option>
             <option value="cuda">GPU (CUDA)</option>
             <option value="cpu">CPU</option>
           </select></label>
-        <label class="field"><span>Диффузионная модель (DiT)</span>
+        <label class="field" title="Модель, которая создаёт звук. turbo — в разы быстрее; sft/base — медленнее, зато работают Guidance и больше шагов"><span>Диффузионная модель (DiT)</span>
           <select id="s-dit">
             <option value="acestep-v15-turbo">turbo — быстрая (8 шагов)</option>
             <option value="acestep-v15-sft">sft — качественнее (32+ шагов)</option>
             <option value="acestep-v15-base">base — гибкая (50 шагов)</option>
           </select></label>
-        <label class="field"><span>Языковая модель (LM-планировщик)</span>
+        <label class="field" title="Модель, которая планирует трек и пишет текст. 1.7B умнее, 0.6B легче по памяти. Без LM нет автотекста и перекраски в каверах"><span>Языковая модель (LM-планировщик)</span>
           <select id="s-lm">
             <option value="auto">Авто (по VRAM)</option>
             <option value="none">Выкл. (быстрее, без авто-текста)</option>
             <option value="acestep-5Hz-lm-0.6B">0.6B</option>
             <option value="acestep-5Hz-lm-1.7B">1.7B</option>
           </select></label>
-        <label class="field"><span>Бэкенд LM</span>
+        <label class="field" title="Движок для языковой модели. Авто выбирает доступный"><span>Бэкенд LM</span>
           <select id="s-backend">
             <option value="auto">Авто</option><option value="vllm">vllm</option><option value="pt">PyTorch</option>
           </select></label>
-        <label class="field"><span>Выгрузка на CPU (offload)</span>
+        <label class="field" title="Держать неактивные модели в оперативной памяти, а не в видеопамяти: меньше VRAM, но медленнее"><span>Выгрузка на CPU (offload)</span>
           <select id="s-offload">
             <option value="auto">Авто</option><option value="on">Вкл. (экономит VRAM)</option><option value="off">Выкл. (быстрее)</option>
           </select></label>
-        <label class="field"><span>Квантование</span>
+        <label class="field" title="INT8 — веса DiT в 8 бит: экономит видеопамять ценой небольшой потери точности"><span>Квантование</span>
           <select id="s-quant">
             <option value="auto">Авто</option><option value="int8">INT8 (экономит VRAM)</option><option value="off">Выкл.</option>
           </select></label>
-        <label class="field"><span>Формат аудио по умолчанию</span>
+        <label class="field" title="Формат файлов, если в форме выбран «По умолчанию»"><span>Формат аудио по умолчанию</span>
           <select id="s-format">
             <option value="flac">FLAC (без потерь)</option><option value="mp3">MP3</option><option value="wav">WAV</option>
           </select></label>
-        <label class="field"><span>Максимальная длительность, с</span>
+        <label class="field" title="Верхняя граница ползунка «Длительность»"><span>Максимальная длительность, с</span>
           <input type="number" id="s-maxdur" min="10" max="600" step="10"></label>
-        <label class="check"><input type="checkbox" id="s-translate"> Переводить русское описание на английский (на CPU)</label>
-        <label class="check"><input type="checkbox" id="s-fastlm"> Ускоренный LM-декодер (CUDA Graphs, ~2× быстрее; только GPU)</label>
-        <label class="check"><input type="checkbox" id="s-preload"> Загружать и прогревать модели при запуске сервера</label>
+        <label class="check" title="Модели лучше понимают английские описания. Перевод выполняется локально на процессоре"><input type="checkbox" id="s-translate"> Переводить русское описание на английский (на CPU)</label>
+        <label class="check" title="Собственный декодер LM на CUDA Graphs: примерно вдвое быстрее планирование"><input type="checkbox" id="s-fastlm"> Ускоренный LM-декодер (CUDA Graphs, ~2× быстрее; только GPU)</label>
+        <label class="check" title="Модели загружаются сразу при старте сервера, и первая генерация не ждёт загрузки"><input type="checkbox" id="s-preload"> Загружать и прогревать модели при запуске сервера</label>
         <div class="form-actions">
           <button type="submit" class="btn primary">Сохранить</button>
           <span class="form-msg" id="settingsMsg"></span>
