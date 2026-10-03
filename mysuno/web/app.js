@@ -533,7 +533,10 @@ $$(".job-list").forEach((list) => list.addEventListener("click", async (e) => {
   if (srow) {
     const k = srow.dataset.sample, sep = k.indexOf("-"), kind = k.slice(0, sep), id = k.slice(sep + 1);
     const item = smpSection(kind).items().find((i) => i.id === id);
-    if (btn.dataset.qact === "splay" && item && LIB.samples[k]) playTrack(smpTrack(kind, item));
+    if (btn.dataset.qact === "splay" && item && LIB.samples[k]) {
+      const t = smpTrack(kind, item), list = smpPlayList();
+      playTrack(t, list.some((x) => x.id === t.id) ? list : [t]);
+    }
     if (btn.dataset.qact === "sgo") showView("samples");
     return;
   }
@@ -842,11 +845,16 @@ function toggleDetails(row, t) {
 /* ===================== «Библиотека» звучаний ===================== */
 /* Минутные сэмплы жанров и настроений. Генерируются по одному по запросу и хранятся отдельно
    от архива (data/samples). Ключ сэмпла — «вид-id»: genre-rock, mood-sad. */
-const LIB = { samples: {}, pending: {}, seconds: 60, sig: "", loaded: false };
+const LIB = { samples: {}, pending: {}, seconds: 60, sig: "", loaded: false, fresh: {}, freshTimer: null };
 const SMP_SECTIONS = [
-  { kind: "genre", title: "Жанры", items: () => S.presets.genres, set: () => S.genres },
+  { kind: "genre", title: "Жанры", items: () => byAlphabet(S.presets.genres), set: () => S.genres },
   { kind: "mood", title: "Настроение", items: () => S.presets.moods, set: () => S.moods },
 ];
+/* по алфавиту: сначала латинские названия, за ними русские */
+function byAlphabet(items) {
+  const cyr = (s) => /^[а-яё]/i.test(s);
+  return [...items].sort((a, b) => cyr(a.label) - cyr(b.label) || a.label.localeCompare(b.label, "ru", { sensitivity: "base" }));
+}
 const smpKey = (kind, id) => `${kind}-${id}`;
 const smpSection = (kind) => SMP_SECTIONS.find((s) => s.kind === kind);
 
@@ -859,15 +867,32 @@ function smpTrack(kind, item) {
   };
 }
 
+const FRESH_MS = 8000;
 async function loadSamples() {
-  try {
-    const r = await api("/samples");
-    LIB.samples = r.samples; LIB.pending = r.pending; LIB.seconds = r.seconds;
-  } catch { return; }
+  let r;
+  try { r = await api("/samples"); } catch { return; }
+  if (LIB.loaded) {   // новый или пересозданный сэмпл (не при первой загрузке страницы) — подсветить
+    for (const [k, m] of Object.entries(r.samples)) {
+      if (!LIB.samples[k] || LIB.samples[k].created_at !== m.created_at) LIB.fresh[k] = Date.now() + FRESH_MS;
+    }
+    if (Object.keys(LIB.fresh).length) { clearTimeout(LIB.freshTimer); LIB.freshTimer = setTimeout(expireFresh, FRESH_MS + 50); }
+  }
+  LIB.samples = r.samples; LIB.pending = r.pending; LIB.seconds = r.seconds;
   LIB.loaded = true;
   LIB.sig = Object.keys(LIB.pending).sort().join();
   renderSamples();
   renderJobs();   // у готовых сэмплов в очереди появляется кнопка прослушивания
+}
+
+function expireFresh() {
+  const now = Date.now();
+  for (const [k, until] of Object.entries(LIB.fresh)) {
+    if (until > now) continue;
+    delete LIB.fresh[k];
+    const el = $(`.smp[data-pid="smp:${CSS.escape(k)}"]`);
+    if (el) el.classList.remove("fresh");
+  }
+  if (Object.keys(LIB.fresh).length) LIB.freshTimer = setTimeout(expireFresh, 500);
 }
 
 /* Сэмплы в работе известны и из опроса очереди: новый или завершённый сэмпл → перечитываем библиотеку */
@@ -905,7 +930,9 @@ function smpTile(sec, item) {
     state = "have";
     left = `<button class="smp-play" data-sact="play" title="Слушать">▶</button>`;
     const bpm = posNum(m.bpm), key = realKey(m.keyscale);
-    sub = esc([fmtTime(m.duration), bpm ? `${bpm} BPM` : "", key, m.dit ? ditLabel(m.dit).replace("ACE-Step 1.5 / ", "") : ""]
+    // язык вокала: у сэмплов, созданных до выбора языка, он русский
+    sub = esc([fmtTime(m.duration), (m.language || "ru").toUpperCase(), bpm ? `${bpm} BPM` : "", key,
+      m.dit ? ditLabel(m.dit).replace("ACE-Step 1.5 / ", "") : ""]
       .filter(Boolean).join(" · "));
     actions = `${useBtn}<button class="btn icon" data-sact="regen" title="Сгенерировать заново (заменит этот сэмпл)">↻</button>`
       + `<button class="btn icon danger" data-sact="del" title="Удалить сэмпл">🗑</button>`;
@@ -919,6 +946,7 @@ function smpTile(sec, item) {
   const tip = m ? [m.caption && `Описание: ${m.caption}`, m.negative && m.negative !== "NO USER INPUT" && `Негативные: ${m.negative}`,
     m.seed != null && `Seed: ${m.seed}`, m.gen_seconds && `Генерация ${m.gen_seconds} с`, m.created_at && `Создан ${fmtDate(m.created_at)}`]
     .filter(Boolean).join("\n") : "";
+  if (LIB.fresh[k] && m) state += " fresh";
   return `<div class="smp ${state}" data-kind="${sec.kind}" data-id="${esc(item.id)}" data-pid="smp:${esc(k)}"${tip ? ` title="${esc(tip)}"` : ""}>
     ${left}
     <div class="smp-meta"><div class="smp-name">${esc(item.label)}</div><div class="smp-sub">${sub}</div></div>
@@ -926,21 +954,32 @@ function smpTile(sec, item) {
   </div>`;
 }
 
+/* пресеты раздела, видимые при текущих поиске и фильтре */
+function smpShown(sec) {
+  const q = $("#smpSearch").value.trim().toLowerCase(), filter = $("#smpFilter").value;
+  return sec.items().filter((i) => {
+    const k = smpKey(sec.kind, i.id);
+    if (q && ![i.label.toLowerCase(), i.id, i.alias || ""].some((v) => v.includes(q))) return false;
+    if (filter === "have") return !!LIB.samples[k];
+    if (filter === "missing") return !LIB.samples[k];
+    return true;
+  });
+}
+
+/* очередь плеера — готовые сэмплы в порядке показа (с учётом поиска и фильтра); сквозная по разделам */
+function smpPlayList() {
+  return SMP_SECTIONS.flatMap((sec) => smpShown(sec).filter((i) => LIB.samples[smpKey(sec.kind, i.id)])
+    .map((i) => smpTrack(sec.kind, i)));
+}
+
 function renderSamples() {
   if (!S.presets) return;
-  const q = $("#smpSearch").value.trim().toLowerCase(), filter = $("#smpFilter").value;
   let have = 0, total = 0;
   const html = SMP_SECTIONS.map((sec) => {
     const all = sec.items();
     const ready = all.filter((i) => LIB.samples[smpKey(sec.kind, i.id)]).length;
     have += ready; total += all.length;
-    const shown = all.filter((i) => {
-      const k = smpKey(sec.kind, i.id);
-      if (q && ![i.label.toLowerCase(), i.id, i.alias || ""].some((v) => v.includes(q))) return false;
-      if (filter === "have") return !!LIB.samples[k];
-      if (filter === "missing") return !LIB.samples[k];
-      return true;
-    });
+    const shown = smpShown(sec);
     if (!shown.length) return "";
     return `<section class="smp-sec ${sec.kind}">
       <h3>${esc(sec.title)} <span class="smp-sec-count">${ready} из ${all.length}</span></h3>
@@ -992,12 +1031,7 @@ $("#smpSections").addEventListener("click", async (e) => {
     case "play": {
       const t = smpTrack(kind, item);
       if (S.playingId === t.id && audio.src) { audio.paused ? audio.play() : audio.pause(); break; }
-      // очередь плеера — готовые сэмплы в том порядке, в каком они сейчас показаны (с учётом поиска и фильтра)
-      const list = $$("#smpSections .smp.have").map((el) => {
-        const s2 = smpSection(el.dataset.kind);
-        return smpTrack(el.dataset.kind, s2.items().find((i) => i.id === el.dataset.id));
-      });
-      playTrack(t, list);
+      playTrack(t, smpPlayList());
       break;
     }
     case "make": makeSample(kind, id); break;

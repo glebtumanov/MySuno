@@ -662,12 +662,13 @@ class AceEngine:
                             or (cover and not lyrics))   # кавер без текста — инструментал
             temperature = float(req.get("temperature") if req.get("temperature") is not None else 0.85)
             lm_sample: dict[str, Any] = {}
+            language = req.get("vocal_language") or "ru"
             if instrumental:
                 lyrics = "[Instrumental]"
             elif not lyrics and req.get("auto_lyrics", True) and llm_ready and not cover:
                 progress(0.2, "LM пишет текст песни…")
                 sample = create_sample(self.llm, query=caption, instrumental=False,
-                                       vocal_language="ru", temperature=temperature)
+                                       vocal_language=language, temperature=temperature)
                 if sample.success and sample.lyrics:
                     lyrics = sample.lyrics
                     lm_sample = {"bpm": sample.bpm, "keyscale": sample.keyscale}
@@ -725,7 +726,7 @@ class AceEngine:
                 caption=caption,
                 lyrics=lyrics,
                 instrumental=instrumental,
-                vocal_language="unknown" if instrumental else "ru",
+                vocal_language="unknown" if instrumental else language,
                 bpm=int(bpm) if bpm else None,
                 keyscale=req.get("keyscale") or lm_sample.get("keyscale") or "",
                 duration=duration,

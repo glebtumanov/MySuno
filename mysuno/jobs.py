@@ -240,6 +240,7 @@ class JobManager:
             "negative": result["negative"],
             "lyrics": result["lyrics"],
             "dit": (result.get("plan") or {}).get("dit"),
+            "language": req.get("vocal_language") or "ru",
             "bpm": ace.get("bpm") or ace.get("cot_bpm") or lm.get("bpm"),
             "keyscale": ace.get("keyscale") or ace.get("cot_keyscale") or lm.get("keyscale"),
         })

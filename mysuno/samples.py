@@ -46,10 +46,18 @@ def title(kind: str, preset_id: str) -> str:
     return f"Сэмпл: {validate(kind, preset_id)}"
 
 
+def language(kind: str, preset_id: str) -> str:
+    """Язык вокала сэмпла: жанры — английский, кроме «национальных»; настроения — русский."""
+    if kind == "mood":
+        return "ru"
+    return presets.GENRE_LANGUAGE.get(preset_id, "en")
+
+
 def build_request(kind: str, preset_id: str) -> dict[str, Any]:
     """Запрос генерации сэмпла: только этот жанр / настроение, остальное решает LM (вокал, текст, темп)."""
     validate(kind, preset_id)
     return {
+        "vocal_language": language(kind, preset_id),
         "prompt": "",
         "genres": [preset_id] if kind == "genre" else [],
         "moods": [preset_id] if kind == "mood" else [],

@@ -378,12 +378,13 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 .smp-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
 .smp {
   display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center;
-  padding: 8px 8px 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2);
+  padding: 8px 8px 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); transition: border-color .8s;
 }
 .smp.missing { background: transparent; border-style: dashed; }
 .smp.missing .smp-name { color: var(--muted); }
 .smp.pending { border-color: var(--accent-2); }
 .smp.playing { border-color: var(--accent); background: rgba(124,92,255,.12); }
+.smp.fresh { border-color: var(--good); }
 .smp .sp-spin { margin: 7px; }
 .smp-play {
   width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--accent); color: #fff;
